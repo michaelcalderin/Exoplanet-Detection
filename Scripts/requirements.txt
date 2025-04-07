@@ -1,6 +1,6 @@
 Dependencies of the Scripts
 
-The following libraries require installation for data collection and processing:
+The following libraries require installation:
 - Pandas
 - SQLite3
 - Numpy
@@ -8,5 +8,8 @@ The following libraries require installation for data collection and processing:
 - Seaborn
 - SciPy
 - Scikit-learn
+- TensorFlow
 
 To use "data_collection.ipynb", wget needs to be installed on the system. Refer to https://irsa.ipac.caltech.edu/docs/batch_download_help.html
+
+Ensure files in the folders of the repository are extracted to your working directory, otherwise the paths will not be recognized in the scripts!
