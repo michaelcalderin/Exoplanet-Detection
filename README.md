@@ -23,4 +23,4 @@ The models were evaluated on the test set in *testing.ipynb* from *Scripts*. Pot
 
 ## Video Demonstrations
 - **Project Overview**: https://youtu.be/yYLAPwx-Lss
-- **Chatbot Demo**: https://youtu.be/BpDTeVWMHE4
+- **Chatbot Demo**: https://youtu.be/odLpmCdUtgg
