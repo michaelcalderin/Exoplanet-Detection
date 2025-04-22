@@ -1,0 +1,451 @@
+
+
+This file is the content of "../Report/Milestone2.pdf"
+
+Identifying Exoplanets from Kepler Light Curves: Milestone 2
+Michael Calderin∗
+University of Florida CAP5771
+(Dated: April 4, 2025)
+1. INTRODUCTION ortime-consumingtomeasurewouldnotbebeneficialto
+NASA’s pipeline.
+Starting in 2009 and continuing for 9.6 years, NASA’s Topresentfindings,aninteractiveconversationalagent
+Kepler/K2 missions set out to hunt for planets outside willbeused. Hopefully,thiswillbevisuallyappealingin-
+of our solar system [1]. A large part of the identification stead of in a command-line but it will depend on model
+process was to record the flux (brightness) from stars in performance and time constraints. A logistic regression,
+a small patch of our galaxy and detect when there is a Recurrent Neural Network (RNN), and Random Forest
+dip in the flux. The dips are typically signs of a planet Classifier model will be trained. SQLite will be used for
+crossing the star. For a planet, these transits are peri- the bulk of the storage, meaning the SQLite3 module.
+odic and can be fit to help estimate parameters such as Pandas, NumPy, and SciPy will be used for data manip-
+the planet’s size, distance from its star, etc. These fit- ulation, and Matplotlib and Seaborn for visualizations.
+tingmodelsalsogivebetterquantificationforthetransit Scikit-learn and TensorFlow will be used for preprocess-
+depth (the amount that the flux falls during the transit) ingandbuildingthemodels. Asfortheagent,ChatGPT
+and other transit-related features. API, and Rasa are contenders.
+However,notalltransitsareplanets. Somestarscome
+in pairs and can also have transits. These are known as
+eclipsingbinaries. Thereareotherfalsepositivessuchas 3. TIMELINE
+interference from the light of other stars. For a transit
+to be confirmed as a planet, there is typically a pipeline February 24, 2025 - March 9, 2025
+that requires additional observations and can take years.
+There are several planetary candidates that to this day The database will be modified to use the star ID
+have not been confirmed to be planets. NASA uses and time stamps of a light curve as the primary key
+Robovetter,adecisiontree,toautomatetheclassification which will speed up queries. A decision tree classifier
+process. It distinguishes between candidates and false will be trained to view its feature importances and help
+positives but does not make predictions for true plan- reduce the dimensionality of the data.
+ets, and even with automation, the full pipeline can be
+long. Detected transits have their classification stored March 10, 2025 - March 16, 2025
+in a ”Kepler Objects of Interest” (KOI) table. Some
+of these classifications/dispositions are from automated Features will be selected based on previous analy-
+processes like Robovetter and others are human-verified. sis. Samples will be split and training/hyper-tuning
+These will be used to train classification models in an will begin for the three supervised classification models,
+attempt to replicate NASA’s exoplanet pipeline. iteratively evaluating performance metrics.
+March 17, 2025 - March 21, 2025
+2. OBJECTIVE AND TECH STACK
+Final attempts for improvements will be made along
+The primary motive will be to classify transits based with an analysis of the strengths, weaknesses, and biases
+off the light curves acquired during the Kepler mission of each model. The report and GitHub will be updated.
+and additional contextual data. A transit will be clas-
+sified as either a confirmed planet or a false positive. March 22, 2025 - March 30, 2025 Using the
+Features chosen for each model will vary and be engi- test set, the best models based on previous performance
+neered to best suit the model. Generally, the flux and will be run. Insights and limitations will be explored.
+times for light curves of stars combined with features
+that provide additional context will be used. Ideally, the March 31, 2025 - April 13, 2025 The conver-
+features should have strong predictive power but also be sational agent will be researched and explored. The
+non-trivial and relatively simple to measure in practice. models might be deployed as an API and use an
+Features with strong predictive power that are difficult SQL database to query from for more reliable re-
+sponses; the agent will likely be fed the final report
+andimportantcodesectionstoanswergeneralquestions.
+∗Electronicaddress: michaelcalderin@ufl.edu April 14, 2025 - April 23, 20252
+With the exception of a few features, the features
+The final presentation and submission will be done. were mainly analyzed and not dropped at this stage.
+Those that were dropped were mainly due to being en-
+tirely null, constant, or in the interest of preserving the
+4. DATA COLLECTION most useful data while having no null values. Basic in-
+formation for each feature such as their null count, de-
+scriptive statistics, most frequent values, etc. were dis-
+All data used is publicly accessible through NASA’s
+played. There were no duplicates. Some features that
+API.Therearenoexplicitlicensingorusagerestrictions,
+obviously needed data types conversions were handled.
+especially for the scope of this project. NASA’s exo-
+Pearson correlation coefficients were calculated for nu-
+planetarchiveprovidesa”CumulativeKeplerObjectsof
+merical features and chi-squared for categorical features.
+Interest (KOI)” table in the form of a CSV which has
+Histograms,frequencybargraphs,andboxplotsforeach
+summary information about each star’s transits. This is
+feature were saved to a folder. Outliers were detected
+where the potential exoplanets’ dispositions are labeled
+but not removed at this stage. However, they were ex-
+as confirmed, candidate, or false positive. This was di-
+cludedforimputationpurposes. Numericalfeatureswere
+rectly downloaded through their website [2] and saved
+scaled using the scikit-learn standard scaler. Scaling
+as KOI cumulative.csv. The light curve data was more
+was done at this point to help with feature selection,
+complicated to fetch since there is 3 TB worth of light
+but each model has its own pipeline that varies and will
+curves in their database. There was a section of the
+later be discussed. The cleaned KOI data was saved as
+archive for bulk downloads that provided a script called
+KOI cumulative cleaned.csv. The SQL database of light
+Kepler KOI wget.bat [3]. Itcontainsawget commandon
+curves originally had slow query times so its exploration
+eachlinethatfetcheslightcurvedataforeachstarthatis
+was limited and its content was left untouched until the
+in the KOI table and would likely amount to more than
+feature selection phase; that is when a clearer picture
+100 GB when fetched in its entirety. Each star’s light
+was drawn for how the content of the database would
+curve is its own dataset.
+be utilized. For more information, refer to the Jupyter
+InaJupyterNotebooktitleddata collection.ipynb,the
+Notebook which has markdown cells with details and in-
+bat file was processed line by line. Single quotation
+sights.
+marks had to be converted to double quotations to be
+able to run the commands on Windows. The com-
+mands were run through Python using its subprocess
+module. The data was saved in an SQLite database ti- 6. EXPLORATORY INSIGHTS
+tled light curves.db and due to the size of the data, only
+relevant features were kept and the process was stopped Duetothelargenumberoffeatures, somekeyinsights
+aftercollectingdataforthefirst2680starswhichisabout will be discussed but they are in no means exhaustive.
+a quarter of the stars in the KOI table and roughly 20 Tobegin,Pearsoncorrelationsshowedthreepredominant
+GB.Sincetransitsaretypicallyperiodic,eachplanetwill areas of high correlations (above 0.8): star/planet char-
+havemultipledipsinitscorrespondingstar’slightcurve; acteristics, equipmentinformation, anderrors. Meaning,
+theserepetitionswillbeutilizedtoaugmentthedatasize. features related to stellar or planetary data could likely
+Withthissample,SQLqueriesarealreadyslow. Interms be reduced to a few key features and the same goes for
+of downloading the data, it took two days to fetch these theothertwocategories. Thechi-squaredtestisshownin
+stars alone. It would have been ideal to use a random Figure 1. Most dependent relationships are contextually
+sample instead of going based on first come first serve, obvious. For example, the disposition and false positive
+but due to computational constraints it would take too flags would be related because one of the classes of dis-
+long to download a random sample at this time. The position is false positive and the flags are simply a more
+potential for bias will be noted and tracked throughout descriptive version of that. This gives strong indication
+the project. thatthecategoricalfeaturescouldbecondensed. Despite
+this, no features were dropped during the exploratory
+phase since that was better suited for the feature selec-
+5. DATA CONTENT AND PREPROCESSING tion and engineering phase. The main emphasis during
+the exploratory phase was to understand the data and
+The data was analyzed in data processing.ipynb. The acquire enough evidence to justify feature selections.
+KOICSVwasreadinasaPandasdataframebutfiltered The target variable is ”koi disposition” and it was im-
+so that it would only include stars that also appeared portanttounderstanditsdistribution. Itturnsoutthere
+in the SQL light curve database. The KOI data had are about 700 candidates, 1000 confirmed planets, and
+3164 rows and 141 columns with features such as star 1400 false positives. The imbalance indicates that strat-
+ID, transit time, duration, etc. The SQL database had ification might be useful for modeling. However, during
+features such as star ID, time of measurement, flux, and feature selection/engineering, multiple transits per star
+quality of measurement. There were six columns and were used so this distribution changed and made the
+over 200 million rows. number of false positives closely match the number of3
+FIG. 1: The p-values after running the chi-squared test on
+non-numericalfeatures. P-valuesof2areobviouslynonphys-
+icalandindicatethatthechi-squaredwouldbeinaccuratefor
+thatpairoffeaturesduetoasmallsizeinexpectedfrequency
+whichdecreasesreliabilityaccordingtothescikit-learndocu- FIG. 2: The mean/median level of confidence in each dispo-
+mentation. sition is displayed. These scores are generated by a Monte
+Carlo technique such that the score’s value is equivalent to
+the fraction of iterations where NASA’s automated classifier
+(Robovetter) outputs ”CANDIDATE”.
+confirmed planets; this will later be revisited.
+InFigure2,higherscoresforcandidatesandconfirmed
+planets indicate greater confidence in the classification
+while for false positives, lower scores indicate greater
+confidence. Across the board, there is high confidence
+in each disposition. Still, there is a notable imbalance,
+specifically for candidates, between median and mode.
+Likely, low-confidence outliers are skewing this category.
+This could be due to false positives having more obvi-
+ouspatternsandconfirmedplanetshavingmorerigorous
+processinginthepipeline,whilecandidateshavelesspre-
+dictable trends and are somewhat in the middle between
+false positives and confirmed.
+AsshowninFigure3,thecurrentsamplefromtheKe-
+pler light curve data was the outer edges of the field of
+view. There are no points from the center. Given that
+Kepler only captured a small section of the sky and it
+was our own galaxy, the data is innately biased aside
+FIG. 3: ”kepid” is a unique identifier for each star and is
+from sampling. It still would have been more represen-
+plotted against right ascension. The accompanying coordi-
+tative of the data at hand to do randomized sampling,
+nate to right ascension, declination, varied from roughly 36
+butthedataisultimatelybiasedregardlessandcomputa-
+to52decimaldegreesandwasalsomissingstarsinthemiddle.
+tionalconstraintsprevented”fair”representation. There It provided no new information in terms of sample selection
+are also drawbacks to randomized sampling such as not that this right ascension visualization did not encapsulate.
+getting enough data from neighboring stars which could
+lead to a lack of recognition of light interference type
+false positives. The problem at hand has many complex the data as outliers. This is not only inconvenient since
+factors at play so optimized sampling would be a study training typically requires as much data as possible, but
+of its own. also disconnected from visual insights. Upon inspection,
+Figure4showsthatthetypesoffalsepositivesarealso many of the ”outliers” are generally part of the cluster
+imbalanced. Due to the size of the data, it is difficult to of data. Unanimous outlier detection seems to be a bet-
+find all imbalances but clearly they are present so this ter fit. Thus, values will be considered outliers if there
+should be noted. is unanimous agreement. These points will be identi-
+In terms of outliers, a democratic method was em- fied as outliers but not discarded. Discarding even one
+ployed between z-score, inter-quartile range, and me- outlier would mean a large amount of light curve data
+dian absolute deviation for each feature. Generally, us- is thrown out. It would also be strange to remove out-
+ing two-thirds agreement was considering too much of liers since transits themselves are rare events compared4
+not a machine learning model. Based off this description
+and its previous high correlation to the class labels, it
+will likely be a strong predictor. In spite of this, part of
+theinterestofthisprojectistoreplicateRobovetterand
+see if improvements can be made to NASA’s pipeline.
+It would be counterproductive to include data generated
+by Robovetter, so ”koi pdisposition” will not be used.
+Similar logic is used to exclude ”koi score”, which gives
+Robovetter’s confidence in its disposition, and the false
+positive flags (generated by Robovetter).
+Features related to errors, such as the margin of er-
+ror for a transit period, were dropped due to their high
+collinearity and contribution of noise to the data. These
+FIG. 4: This is the distribution of false positive flags. ”nt”
+error-based features saturate the feature space which
+is not transit-like, ”ss” is stellar eclipse, ”co” is centroid off-
+would likely prevent the decision tree classifier from ac-
+set (detecting light from a different, nearby star), and ”ec”
+curately picking out the most relevant features.
+is ephemeris contamination (flux contamination or electrical
+crosstalk). The target label, ”koi disposition”, was encoded using
+the ordinal encoder from scikit-learn. The false posi-
+tive class was marked as 0, candidate was marked as 1,
+to the number of data points in a light curve. For more and confirmed was marked as 3. This artificial ordering
+specifics on summary statistics, distributions, etc., refer was to imply the ”closeness” that a sample is to being a
+to the Jupyter Notebook which is documented step-by- planet. Few categorical features were left and they were
+step. relatively low cardinality so they were one-hot encoded;
+they also had no implicit ordering to justify an ordinal
+encoding.
+7. FEATURE ENGINEERING AND SELECTION At this point, the KOI data was clean enough to
+train a decision tree classifier that could help with fea-
+7.1. Encoding and Data Reduction ture selection. A tree was used because scikit-learn
+provides an accessible list of feature importances which
+KOI cumulative cleaned.csv wasusedforfeatureselec- represents the importance of the variable in making
+tion purposes. The ”kepoi name” feature was a unique its splits/classifications; trees naturally capture non-
+identifier for each transit so it had no predictive value linearity and NASA’s pipeline is also rule-based when
+and was dropped (along with similar identifiers). Note flagging false positives which is similar to a tree’s behav-
+that although it was dropped for feature selection, it ior. Thedatafromthelightcurvedatabasewasnotused
+wasstillusefulforidentificationpurposesthroughoutthe here because the emphasis was to reduce dimensionality;
+pipeline. Thus, a feature may be discarded for a partic- thelightcurvedatabasehadamuchsmallerfeaturespace
+ular task such as feature selection or model training, but so seeing the most relevant features was much more ob-
+be reintroduced to provide additional context for perfor- vious. Figure5showsasnippetofcodeusedfortraining
+mance. For example, planet size could be irrelevant for the tree. When splitting the data into 80% for train-
+such tasks, but it might be interesting to see how model ingand20%fortesting, stratificationbythetargetlabel
+performance varies by planet size. was used so that the ratios of the classes were preserved.
+”koi quarters” was a binary string where each bit rep- The tree was hyperparameter tuned with K-Fold cross-
+resented whether data was collected in that quarter of validation(5folds). Optimizationwasbasedonprecision
+the Kepler mission. Although this format is easy for a since the desired behavior of the models was to be confi-
+human to read, the models would likely benefit from a dentinitspredictions; discoveringanewplanetisabold
+more intuitive form. It was engineered into two forms. claim and it would be disappointing to later find out it
+The first was 32 new features, each with a binary digit wasnotatrueplanet. Thebesttreehadthefollowinghy-
+thatrepresentedwhetherdatawascollectedinthatquar- perparameters: ”criterion” set to entropy, ”max depth”
+ter or not. The second form was one new feature that of 10, ”min samples leaf” of 2, and ”min samples split”
+represented the number of quarters that data was col- of 200. For validation, the mean metrics across all folds
+lected in. Later, a decision tree classifier was used and were 0.77 for precision, 0.75 for recall, 0.76 for F1, 0.80
+itslistoffeatureimportancesshowedthatotherfeatures for accuracy, and 0.91 for AUC. Similarly for the train-
+were much more powerful. The chosen features and the ingdata,precisionwas0.80,recallwas0.78,F1was0.79,
+rationale for choosing them will soon be discussed in accuracy was 0.82, and AUC was 0.93. Based on these
+greaterdetail,butnotethateventheengineeredversions metrics, there were minor indications of overfitting but
+of ”koi quarters” were not used. not a concerning amount.
+”koi pdisposition” is the guess from NASA’s auto- Looking at the tree’s feature importances, many fea-
+mated system called Robovetter which is rule-based and tures were assigned zero weight. Out of the ones as-5
+FIG.5: Thiscodewasusedtotrainthedecisiontreeclassifierthathelpedwithdimensionalityreductionandfeatureselection.
+The hyperparameters were varied through GridSearchCV from scikit-learn and are represented in the ”params” dictionary.
+K-Fold cross-validation was used with 5 folds, optimizing for precision.
+signed non-zero importance, the following were chosen: candidate class was not used for training. This resulted
+”koi ror” (0.26 importance), ”koi dikco msky” (0.22 im- in approximately balanced classes and 7301 samples to
+portance), and ”koi max mult ev” (0.12 importance). use for training and testing. Roughly, each model was
+These were one of the most important, but not neces- trained on 30 time steps with the associated brightness
+sarily the top three. The decision was largely aided by for each time, and the three contextual features. Ad-
+domainknowledgeandensuringthatthecorrelationma- justmentsweremadedependingonthemodelandthisis
+trix did not indicate high collinearity. ”koi ror” is the explored in Section 7.2.
+ratio of the planet radius to star radius and was chosen
+since it provides information about the size of the tran-
+siting object and star. ”koi dikco msky” represents the
+7.2. Model-Specific Engineering
+difference between the observed position of a star and
+its cataloged position, so it gives insight to the uncer-
+tainty in positional alignment which helps detect false RNNs can accept tensors as input which allows each
+positives that are light interference. ”koi max mult ev” time to be paired with its associated flux so the features
+is the maximum signal to noise ratio which helps distin- did not have to be engineered other than reshaping into
+guish instrumental noise. These three are considered the acompatibletensor;thespecificshapeswillbeexplained
+”contextual” features; they supplement the raw bright- in Section 8 since they are part of the model architec-
+ness of a star during a transit and roughly cover all the ture. However, logistic regression and random forest are
+types of false positives. limited to 2-dimensional input so instead of having the
+times and fluxes as inputs, they were engineered into 29
+ThelightcurvesintheSQLdatabaseweretransformed features that represent the slope of the flux. Each fea-
+into features. For a given potential planet, 30 time steps ture is the change in flux divided by the change in time
+centered around its first detected transit were used as between each pair of adjacent time steps. Time and its
+columns in a CSV file; specifically 30 were used due to corresponding flux come in pairs for each time step, so
+computationalconstraintsandmostsampleshavingtran- this engineering was done to help the models recognize
+sitlengthswithinthiswindow. ThePDCSAPfluxisthe the pairwise relationship since they cannot process fea-
+brightness of the star after being processed by NASA’s tures sequentially like RNNs.
+pipeline to help remove instrumental effects while keep- The features for the random forest were not scaled
+ingthetransits;itwasincludedforeachtimestep. Other since it is an ensemble of decision trees which do not re-
+variables were also added to the CSV for each time step quire scaling and could otherwise distort the data. The
+but were ultimately unused. Transits that had less than features for the logistic regression were normalized using
+30 time steps were not included. As these transits are the standard scaler from scikit-learn since it helps with
+periodic, the first four dips were used to augment the convergenceandpreventsfeatureswithlargerscalesfrom
+number of samples in the dataset; if an object had less dominating; the standard scaler was preferred over the
+than four transits, then the amount of transits it had min-max scaler because it is less sensitive to outliers. In
+were used. This process resulted in about 10,318 sam- contrast, the features for the RNN were scaled using the
+ples of transits and the table was saved as transits.csv. min-max scaler from scikit-learn; since transit dips can
+Originally,theclassificationwasgoingtobeforfalsepos- be small, it is likely best to remain in a consistent range
+itives, candidates, and confirmed planets, but due to the for a model that can process the data sequentially. For
+data augmentation, there were enough samples to train all models, the target label was ordinally encoded with
+a binary problem predicting just false positives and con- 0 representing a false positive and 1 representing a true
+firmed planets. This was ideal since ”candidates” are a planet;thisistypicallyrequiredbythelibrariesandmod-
+grayareathatworsentheperformanceofthemodels,and elschosen, buttheorderingalsohastheintendedbehav-
+with binary decisions, these candidates could be classi- iorofviewingclass1as”more”ofaplanetandclass0as
+fiedintoplanetsorfalsepositiveswhichismoreusefulto ”less” of a planet. Categorical features were previously
+NASA’s pipeline. Thus, the problem statement became used,buttheywerenotneededorusedfortrainingsince
+to classify transits as planets or false positives and the numerical features happened to be the most important6
+based on feature selection.
+8. DATA MODELING
+8.1. Random Forest Classifier
+As mentioned, the feature space was customized for
+each model, but those resulting sets were all split into
+80%fortrainingand20%fortesting. Thissplitwasdone
+in an attempt to train on as much data as possible while
+still setting samples aside to evaluate generalization to
+data that was unseen during training. Stratification was FIG. 6: This code was used to train the random for-
+used for the target label even though it was relatively est classifier. The hyperparameters were varied through
+GridSearchCV from scikit-learn and are represented in the
+balanced to help ensure the training and testing perfor-
+”params” dictionary. K-Fold cross-validation was used with
+mance could be directly comparable. Other imbalances
+5 folds, optimizing for precision.
+couldexistbetweenthesetsbutanimbalanceofthetar-
+get label would likely be the greatest disturbance. Note
+thatallmodelsweresavedaspicklefilesforfutureusein
+a ”Models” folder.
+Therandomforestclassifierfromscikit-learnwasused
+and it classifies by averaging the predictions of an en-
+semble of decision trees, each adjusted with some ran-
+domness for reduced overfitting. It was hyperparameter
+tunedasshowninFigure6. Hyperparameterssuchascri-
+terionandmaxtreedepthwerevariedwithK-Foldcross-
+validation (5 folds), optimizing for precision. The best
+hyperparameters found were the following: gini for ”cri-
+terion”, 50 for ”max depth”, 2 for ”min samples leaf”,
+and 450 for ”min samples split”. The mean validation
+scores across all folds were: 0.93 for precision, 0.91 for
+recall, 0.92 for F1, 0.93 for accuracy, and 0.98 for AUC.
+The mean training scores across all folds were: 0.94 for
+precision, 0.92 for recall, 0.93 for F1, 0.93 for accuracy,
+and 0.98 for AUC. There was minimal increased perfor-
+mance for the training data compared to the validation FIG. 7: Confusion matrix for random forest classifier on the
+data. training data, where 0 represents the false positive (non-
+planet) class and 1 is the true/confirmed planet class.
+The confusion matrix on the entirety of the training
+data is shown in Figure 7. There are fewer misclassifica-
+tions for the non-planet class. Figure 8 shows the ROC
+8.2. Logistic Regression
+curve with an AUC of 0.98, indicating a strong ability
+to separate the classes. Figure 9 shows the importance
+of each feature for the model to make its decisions. A The logistic regression model from scikit-learn was
+largeemphasisisplacedonthethreecontextualfeatures. used and it classifies by feeding a linear combination of
+Out of the features that represent the slope of the light the features into a sigmoid function bounded between 0
+curve, there are two peaks which correspond to the re- and 1. It was hyperparameter tuned as shown in Figure
+gionnearthecenterofatransit. Thiscouldindicatethat 10. Hyperparameterssuchasthepenaltyandsolverwere
+themostimportantcharacteristicsareslightlybeforethe varied with K-Fold cross-validation (5 folds), optimizing
+center of the transit and slightly after, indicating a need for precision. The best hyperparameters found were the
+for depth perception. Another possibility is that non- following: ”C” of 5, ”max iter” of 100, ”penalty” of l1,
+planets sometimes have two dips and this could be an andliblinearasthe”solver”. Themeanvalidationscores
+indication; samples with two dips might be a clear red across all folds were: 0.88 for precision, 0.96 for recall,
+flag. 0.92 for F1, 0.92 for accuracy, and 0.95 for AUC. The7
+FIG.8: ReceiverOperatingCharacteristic(ROC)curvewith
+FIG. 10: This code was used to train the logistic re-
+its associated Area Under the Curve (AUC) for the random
+gression model. The hyperparameters were varied through
+forest classifier.
+GridSearchCV from scikit-learn and are represented in the
+”params” dictionary. K-Fold cross-validation was used with
+5 folds, optimizing for precision.
+FIG. 9: Feature importances of the random forest classifier,
+as provided by scikit-learn.
+FIG.11: Confusionmatrixforlogisticregressiononthetrain-
+ing data, where 0 represents the false positive (non-planet)
+mean training scores across all folds were: 0.88 for pre-
+class and 1 is the true/confirmed planet class.
+cision, 0.97 for recall, 0.92 for F1, 0.92 for accuracy, and
+0.96forAUC.Therewasnosignificantdifferencebetween
+training and validation performance, likely due to regu-
+larization preventing overfitting. 8.3. Recurrent Neural Network
+The confusion matrix on the entirety of the training
+data is shown in Figure 11. There are fewer misclassi- Figure14showsthestructureoftheRNNmodel,built
+fications for the true non-planet class. Figure 12 shows using TensorFlow. The time input was a tensor in the
+the ROC curve with an AUC of 0.96, indicating a strong following shape: (number of samples, 30, 2). ”30” rep-
+ability to separate the classes. Figure 13 shows the mag- resented the number of time steps and ”2” represented
+nitudeofthecoefficientswhichisanalogoustothefeature the time and PDC SAP flux for each time step. The
+importances of the random forest. The three contextual contextualinputwasforthethreechosencontextualfea-
+featuresareimportant,butthereismuchmorevariability turesandwasatensorofthefollowingshape: (numberof
+in the time-based features. This could indicate a greater samples,3,). Thenumberofneuronsanddropoutshown
+understanding of the nuances of the light curve, or diffi- were the best hyperparameters found for maximum val-
+culty picking out the main patterns. idation precision. 20% of the training data was reserved8
+for dropout, LSTM vs. GRU, and (16, 32, 64, 128) for
+batch size.
+FIG.12: ReceiverOperatingCharacteristic(ROC)curvewith
+itsassociatedAreaUndertheCurve(AUC)forlogisticregres-
+sion.
+FIG.14: StructureoftheRNNmodelwiththebesthyperpa-
+rameters shown for each layer, optimizing for precision.
+After the best model was found, it was trained on the
+entire training dataset for the full 200 epochs without
+early stopping. Learning rate and batch size were manu-
+FIG. 13: Coefficients of logistic regression, as provided by allychosentobe0.0001and32,respectively,basedonthe
+scikit-learn, after retaining their absolute value. shape of the loss function across the epochs. A smooth
+curve and a flat-line indicating convergence was sought
+after and shown in Figure 15. Validation loss was typ-
+for validation and 200 epochs were attempted per con- ically lower than training loss which was an indicator
+figuration with early stopping (patience of 5 monitoring that the model was not overfitting. On the last epoch,
+the validation loss). Binary cross-entropy was chosen as the training accuracy was 0.91, precision was 0.86, and
+the loss function due to its convexity which helps with recall was 0.95. The validation accuracy was 0.92, vali-
+convergence. TensorFlow’s Adam optimizer was used. dation precision was 0.90, and validation recall was 0.94.
+The output layer was a sigmoid but all other dense lay- Validationperformancewasbetterthanthetrainingper-
+erswerearectifiedlinearunit(ReLU).Whentuning,the formance so the model seems to generalize well.
+option was given between either using Long Short-Term Figure16showstheconfusionmatrix. Therearefewer
+Memory (LSTM) or the Gated Recurrent Unit (GRU). misclassifications for the true planet class. Figure 17
+The best model chose LSTM. Batch normalization was showstheROCcurvewithanAUCof0.97whichdemon-
+used to prevent distribution shifts and dropout was used strates strong discriminatory power.
+to prevent overfitting. 50 configurations were run to find
+thebesthyperparameters,randomlychoosingthehyper-
+parameters during each iteration. The options for the 8.4. Training Performance Comparison
+hyperparameters were the following: (1x10−3, 1x10−4,
+1x10−5) for learning rate, (16, 32, 64, 128, 256) for the Randomforesthadfewermisclassificationsforthenon-
+number of neurons in a layer, (0, 0.1, 0.2, 0.3, 0.4, 0.5) planet classwhichwas in contrast tothe other two mod-9
+came confused. However, we cannot rule out the possi-
+bility that logistic regression picked up on more complex
+patterns and was possibly not a strong enough model to
+decipher or utilize them properly.
+Both random forest and logistic regression seemed
+to have an over-reliance on the contextual features, al-
+though less so for the logistic regression. In terms of
+metrics,theRNNandrandomforestwereclosecompeti-
+FIG. 15: Training and validation loss of the RNN across the
+200 epochs it was trained over. The loss function used was
+binary cross-entropy.
+FIG.17: ReceiverOperatingCharacteristic(ROC)curvewith
+its associated Area Under the Curve (AUC) for the RNN.
+tors. Logisticwasnotfarbehindbuttherewascertainlya
+gapcomparedtotheothertwo. Ingeneral,randomforest
+made the fewest misclassifications and had the greatest
+discriminatory power. It also had the highest validation
+precision which was the primary metric. Its complex-
+ity is also lower than the RNN so at this point, it was
+the best model, followed by the RNN and then logistic
+regression. It is interesting to point out that NASA’s
+Robovetter created the false positive class labels. Recall
+FIG. 16: Confusion matrix for RNN on the training data,
+where0representsthefalsepositive(non-planet)classand1 that Robovetter is rule-based like a decision tree so ran-
+is the true/confirmed planet class. domforestmighthavenaturallybeenabletocapturethis
+behaviorthebestsinceitistree-based. Itcouldalsohave
+beenbiassincethefeatureimportancesofadecisiontree
+els which had fewer misclassifications for the true planet wereusedtohelpwithfeatureselections. RNNstypically
+class. Based on AUC, the RNN and random forest had do well with time series data so the fact its performance
+the strongest discriminatory power. Random forest also wassoclosetotherandomforestisinteresting. Thereare
+paid less attention to the time-based features compared severalpossibilities,includingthisproject’smethodology,
+to the logistic regression. This was likely because the thelimitedsizeofthetrainingdata,andthepotentialfor
+random forest was able to pick out the most important the false positive class to have inaccuracies since NASA
+aspectsofthetimeserieswhilethelogisticregressionbe- had an automated system generate them.
+[1] NASA, Kepler by the numbers, cumulative KOI data.
+https://science.nasa.gov/resource/ [3] NASA,Bulkdatadownload,https://exoplanetarchive.
+nasas-kepler-mission-by-the-numbers/ (2018). ipac.caltech.edu/bulk_data_download/, kepler KOI
+[2] NASA, Kepler objects of interest, https:// time series.
+exoplanetarchive.ipac.caltech.edu/docs/data.html,

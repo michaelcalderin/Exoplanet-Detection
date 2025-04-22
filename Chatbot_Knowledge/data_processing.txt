@@ -1,0 +1,763 @@
+
+
+This file is the content of "data_processing.ipynb"
+
+Markdown Cell:
+## Markdown Content:
+# Data Preprocessing and Exploration
+
+Markdown Cell:
+## Markdown Content:
+# Candidate Planets
+
+Markdown Cell:
+## Markdown Content:
+### Load Data
+
+Code Cell:
+```python
+import pandas as pd
+import sqlite3
+
+# Load in data for candidates
+pd.set_option('display.max_columns', None)
+KOI_df = pd.read_csv('KOI_cumulative.csv', comment='#')
+
+# Find kepids in light curve data
+conn = sqlite3.connect('light_curves.db')
+cursor = conn.cursor()
+cursor.execute('PRAGMA cache_size = 1000000')
+
+query = """
+    SELECT KEP_ID AS kepid
+    FROM LightCurve 
+    GROUP BY KEP_ID;
+    """
+
+kepids_df = pd.read_sql(query, conn)
+```
+
+Code Cell:
+```python
+# Filter candidates to only include candidates there is light curve data for
+
+available_ids = kepids_df['kepid'].unique()
+indices = KOI_df.index
+    
+for i in indices:
+
+    if KOI_df.loc[i, 'kepid'] not in available_ids:
+
+        KOI_df = KOI_df.drop(index=i)
+
+display(KOI_df)
+```
+
+Markdown Cell:
+## Markdown Content:
+### Acquire Preliminary Understanding
+
+Code Cell:
+```python
+# Verify data types
+print('Data Types')
+print('------------------')
+for col in KOI_df.columns:
+    print(f'{col}: {KOI_df[col].dtype}')
+```
+
+Markdown Cell:
+## Markdown Content:
+Some variables (mainly categorical ones) could benefit from a data type conversion. For example, "koi_disposition" is better suited as a categorical type instead of a string/object. This is noted and will be acted upon after the columns are truncated so that greater attention to detail can be made for the remaining subset of columns. It is not too important to convert object to category since it will be processed equally (disregarding the memory/speed efficiency). However, it is important to convert numerical types that should be category type so that it is not processed as a standard numerical type.
+
+Code Cell:
+```python
+# Convert appropriate numerical types to category type (flags and ids)
+for col in KOI_df.columns:
+    if col.find('koi_fp') != -1:
+        KOI_df[col] = KOI_df[col].astype('category')
+
+KOI_df['kepid'] = KOI_df['kepid'].astype('category')
+KOI_df['rowid'] = KOI_df['kepid'].astype('category')
+```
+
+Code Cell:
+```python
+import numpy as np
+
+# Description for numeric attributes
+print('Numeric: Describe Data')
+display(KOI_df.describe())
+
+print('Numeric: Relative Standard Deviations')
+print('-------------------------------')
+for col in KOI_df.select_dtypes(include='number'):
+    rel_std = np.abs(KOI_df[col].std()/KOI_df[col].mean())
+    print(f'{col}: {rel_std:.2f}')
+```
+
+Markdown Cell:
+## Markdown Content:
+A few columns like "koi_model_dof" are fully null and can be discarded (similarly with constant columns). Asides from that, most features have few null values and can likely be imputed from the non-null values. Judging by the relative standard deviations and mean values, there is a range of sparsity and several features are on different scales so the data would likely benefit from scaling.
+
+Code Cell:
+```python
+# Description for categorical attributes
+print('Categorical: Describe Data')
+print('----------------------------')
+for col in KOI_df.select_dtypes(exclude='number'):
+
+    print()
+
+    # Print feature name
+    print(f'Feature: {col}')
+
+    # Print number of null entries
+    num_null = KOI_df[col].isna().sum()
+    print(f'Number of Null Values: {num_null}')
+
+    # Print data type
+    type = KOI_df[col].dtype
+    print(f'Type: {type}')
+
+    # Print number of unique entries
+    nunique = KOI_df[col].nunique()
+    print(f'Number of Unique Values: {nunique}')
+
+    # Print up to 5 most frequent unique entries and their number of occurrences
+    max_unique = 5
+    most_frequent = KOI_df[col].value_counts().head(max_unique)
+    print(f'Top {max_unique} Most Frequent Values:')
+
+    for i, (value, frequency) in enumerate(most_frequent.items()):
+
+        print(f'\t{i+1}. {value}: {frequency} occurrences')
+
+        if i == max_unique-1:
+            break
+```
+
+Markdown Cell:
+## Markdown Content:
+There are several features with one unique value which would provide no information. There are also features with values that require additional context (e.g. "koi_datalink_dvs" is a pdf file which is only useful if one goes to its website and reads its text but this would be difficult without something like an LLM). "rowid" seems to be a counter so it can later be discarded.
+
+Markdown Cell:
+## Markdown Content:
+### Drop Columns That Provide No Information
+
+Markdown Cell:
+## Markdown Content:
+Columns with fully null or constant values provide no predictive information and cannot be imputed with their own data so they will be dropped.
+
+Code Cell:
+```python
+# Drop fully null or constant features
+null_or_constant_cols = []
+
+for col in KOI_df.columns:
+
+    if KOI_df[col].nunique() <= 1:
+
+        null_or_constant_cols.append(col)
+
+KOI_df = KOI_df.drop(columns=null_or_constant_cols)
+print(f"Dropped due to being fully null or constant: {null_or_constant_cols}")
+```
+
+Markdown Cell:
+## Markdown Content:
+### Look for Duplicates
+
+Code Cell:
+```python
+# Print number of duplicate rows
+print(f'Number of Duplicate Rows: {KOI_df.duplicated().sum()}')
+```
+
+Markdown Cell:
+## Markdown Content:
+### Analyze Correlation and Chi-Squared
+
+Code Cell:
+```python
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Show high correlations (absolute value is greater than or equal to threshold)
+# Exclude correlations of a variable with itself
+threshold = 0.8
+corr = KOI_df.corr(method='pearson', numeric_only=True)
+high_corr = {}
+
+for row in corr.index:
+    for col in corr.columns:
+
+        if col == row:
+            break
+
+        pearson = corr.loc[row, col]
+
+        if np.abs(pearson) >= threshold:
+            if row not in high_corr:
+                high_corr[row] = [col]
+            else:
+                high_corr[row].append(col)
+
+print(f'High Pearson Correlations (>= {threshold})')
+print('------------------------------------------')
+col_length = 22
+print(f'{"Feature 1":<{col_length}} {"Feature 2":<{col_length}} {"Pearson":<{col_length}}')
+print(f'{"-------------------":<{col_length}} {"-------------------":<{col_length}} {"---------":<{col_length}}')
+
+for row in high_corr:
+    for col in high_corr[row]:
+        print(f'{row:<{col_length}} {col:<{col_length}} {corr.loc[row, col]:<{col_length}.2f}')
+```
+
+Markdown Cell:
+## Markdown Content:
+There are about 3 predominant categories of high correlations: features related to star/planet characteristics, equipment, and errors. In the future, this could be used to condense the dataset since key characteristics of a star would likely speak for all other characteristics derived from them and the same is true for data related to the equipment. Some upper limit errors are correlated to lower limit errors which is redundant information. Interestingly, the value of some variables are correlated to the errors which indicates there are features that have increased/decreased error depending on their value.
+
+Code Cell:
+```python
+from scipy.stats import chi2_contingency
+
+# Compute pearson chi-squared (allow up to 20% of expected frequencies to be less than 5, otherwise mark p as 2)
+# Scipy documentation says this test is unreliable for frequencies less than 5
+categorical_names = KOI_df.select_dtypes(exclude='number').columns
+chi2_dict = {}
+
+for i in range(len(categorical_names)):
+    name = categorical_names[i]
+    chi2_dict[name] = [np.nan for _ in range(len(categorical_names))]
+
+p_matrix = pd.DataFrame(chi2_dict, index=categorical_names, columns=categorical_names)
+
+for row in categorical_names:
+    for col in categorical_names:
+
+        crosstab = pd.crosstab(KOI_df[row], KOI_df[col])
+        chi2, p, dof, expected_freq = chi2_contingency(crosstab)
+        threshold = 0.2
+        freq_ratio_less_than_5 = expected_freq[expected_freq<5].size/float(expected_freq.size)
+
+        if freq_ratio_less_than_5 > threshold:
+            p_matrix.loc[row, col] = 2
+        else:
+            p_matrix.loc[row, col] = round(p, 2)
+
+
+```
+
+Code Cell:
+```python
+# Plot p-values from chi-squared test
+plt.figure(figsize=(12,5))
+sns.heatmap(p_matrix, annot=True, cmap='coolwarm')
+plt.title('P-Values from Chi-Squared Test for Non-Numerical Features', pad=15)
+plt.annotate(text=r'* Frequencies less than 5 decrease reliability, so if over 20% of expected frequencies for a pair were less than 5, the p-value was marked as 2', xy=(-100,-130), xycoords='axes points')
+plt.show()
+```
+
+Markdown Cell:
+## Markdown Content:
+### Visualizations for Target and Features of Current Interest
+
+Markdown Cell:
+## Markdown Content:
+The target variable will be "koi_disposition" so the analysis will have greater emphasis on understanding relationships to this variable.
+
+Code Cell:
+```python
+# Distribution of categories in "koi_disposition" (target)
+data = KOI_df.groupby('koi_disposition')['koi_score'].agg(['mean', 'median'])
+width = 0.8
+ax = data.plot.bar(width=width, figsize=(9,6), edgecolor='black')
+ax.grid(linestyle='--')
+ax.set_axisbelow(True)
+plt.title('Level of Confidence in Disposition', pad=15, fontsize=14)
+plt.xlabel('koi_disposition', labelpad=15, fontsize=12)
+plt.ylabel('koi_score (0 to 1)', labelpad=15, fontsize=12)
+plt.xticks(fontsize=11)
+plt.yticks(fontsize=11)
+plt.ylim([0,1.2])
+
+for i, disposition in enumerate(data.index):
+    mean = data.loc[disposition, 'mean']
+    median = data.loc[disposition, 'median']
+    ax.annotate(text=f'{mean:.2f}', xy=(i-width/4, mean+0.02), ha='center', fontsize=12)
+    ax.annotate(text=f'{median:.2f}', xy=(i+width/4, median+0.02), ha='center', fontsize=12)
+
+plt.legend(fontsize=11)
+plt.show()
+```
+
+Code Cell:
+```python
+# Histogram of disposition score
+KOI_df['koi_score'].plot.hist(figsize=(10,8), bins=10, edgecolor='black')
+plt.title('Distribution of Disposition Confidence', pad=15, fontsize=14)
+plt.xlabel('koi_score (0 to 1)', labelpad=15, fontsize=12)
+plt.ylabel('Number of Scores', labelpad=15, fontsize=12)
+xticks = [i for i in np.arange(0,1.1,0.1)]
+yticks = [i for i in range(0, 1600, 100)]
+plt.xticks(ticks=xticks, fontsize=12)
+plt.yticks(ticks=yticks, fontsize=12)
+plt.grid(linestyle='--')
+plt.gca().set_axisbelow(True)
+plt.ylim([0,1400])
+
+plt.show()
+```
+
+Code Cell:
+```python
+import os
+
+# Save hist and box for numerical types, bar for categorical types (with 10 or fewer unique categories)
+cat_fts = KOI_df.select_dtypes(exclude='number').columns
+num_fts = KOI_df.select_dtypes(include='number').columns
+
+if not os.path.exists('plots'):
+    os.mkdir('plots')
+
+if not os.path.exists('plots/distributions'):
+    os.mkdir('plots/distributions')
+
+for feature in cat_fts:
+
+    if KOI_df[feature].nunique() > 10:
+        continue
+
+    print(f'Saving figures for {feature}')
+    plt.clf()
+    ax = KOI_df.groupby(feature)[feature].count().plot.bar(edgecolor='black')
+    plt.xlabel(feature)
+    plt.ylabel('Number of Occurrences')
+    plt.tight_layout()
+    plt.savefig(f'plots/distributions/{feature}-bar.png', dpi=300)
+
+for feature in num_fts:
+    print(f'Saving figures for {feature}')
+    plt.clf()
+    ax = KOI_df[feature].plot.hist(edgecolor='black')
+    plt.xlabel(feature)
+    plt.ylabel('Number of Occurrences')
+    plt.tight_layout()
+    plt.savefig(f'plots/distributions/{feature}-hist.png', dpi=300)
+    plt.clf()
+    ax = KOI_df[feature].plot.box()
+    plt.ylabel(f'Value of {feature}')
+    plt.tight_layout()
+    plt.savefig(f'plots/distributions/{feature}-box.png', dpi=300)
+```
+
+Code Cell:
+```python
+# Make scatter plots to see relationship between detection direction and star id
+plt.scatter(KOI_df['kepid'], KOI_df['dec'], s=5)
+plt.title('Light Detection Direction: Declination', pad=15)
+plt.xlabel('kepid', labelpad=15)
+plt.ylabel('dec (decimal degrees)', labelpad=15)
+plt.tight_layout()
+plt.show()
+
+plt.scatter(KOI_df['kepid'], KOI_df['ra'], s=5)
+plt.title('Light Detection Direction: Right Ascension', pad=15)
+plt.xlabel('kepid', labelpad=15)
+plt.ylabel('ra (decimal degrees)', labelpad=15)
+plt.tight_layout()
+plt.show()
+```
+
+Code Cell:
+```python
+# Plot distribution of false positive flags
+flags = ['koi_fpflag_nt', 'koi_fpflag_ss', 'koi_fpflag_co', 'koi_fpflag_ec']
+counts = []
+
+for flag in flags:
+    count = KOI_df[flag].astype(int).sum()
+    counts.append(count)
+
+plt.figure(figsize=(10,6))
+plt.bar(flags, counts, edgecolor='black')
+plt.title('False Positive Flags', pad=15, fontsize=14)
+plt.xlabel('Flag Types', labelpad=15, fontsize=12)
+plt.ylabel('Number of Occurrences', labelpad=15, fontsize=12)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+
+for i, count in enumerate(counts):
+    plt.annotate(text=f'{count}', xy=(i, count+6), ha='center', fontsize=12)
+
+plt.grid(linestyle='--')
+plt.gca().set_axisbelow(True)
+plt.tight_layout()
+plt.show()
+```
+
+Markdown Cell:
+## Markdown Content:
+### Detect Outliers
+
+Code Cell:
+```python
+from scipy.stats import zscore
+
+# This function was provided in the Data Wrangling Demo by Grant & Castro (CAP5771, University of Florida, 2025)
+def detect_outliers_democratic(df, min_agreement = 2):
+    df = df.copy()  
+    num_cols = df.select_dtypes(include=['number']).columns  
+    outlier_summary = {}
+
+    print(f'Numerical Outliers: Agreement of {min_agreement} out of 3 Methods')
+    print('----------------------------------------------------------------------')
+
+    for col in num_cols:
+        values = df[col].dropna()  
+        
+        Q1 = np.percentile(values, 25)
+        Q3 = np.percentile(values, 75)
+        IQR = Q3 - Q1
+        iqr_lower = Q1 - 1.5 * IQR
+        iqr_upper = Q3 + 1.5 * IQR
+        iqr_outliers = values[(values < iqr_lower) | (values > iqr_upper)].index
+
+        z_scores = zscore(values)
+        z_outliers = values[np.abs(z_scores) > 3].index
+
+        median = np.median(values)
+        mad = np.median(np.abs(values - median))
+        mad_threshold = 3 * mad
+        mad_outliers = values[np.abs(values - median) > mad_threshold].index
+
+        all_outliers = list(iqr_outliers) + list(z_outliers) + list(mad_outliers)
+        outlier_counts = pd.Series(all_outliers).value_counts()
+        final_outliers = outlier_counts[outlier_counts >= min_agreement].index.tolist()
+
+        if final_outliers:
+            outlier_summary[col] = final_outliers
+
+    if outlier_summary:
+        for col, indices in outlier_summary.items():
+            print(f"{col}: {len(indices)} outliers detected at {indices}")
+
+    return outlier_summary
+```
+
+Code Cell:
+```python
+# Find numerical outliers
+outliers_2agree = detect_outliers_democratic(KOI_df, 2)
+print()
+outliers_3agree = detect_outliers_democratic(KOI_df, 3)
+```
+
+Code Cell:
+```python
+# Save scatter plots of kepid compared to each feature (with outliers marked, 2/3 outlier detection methods agreed)
+
+if not os.path.exists('plots'):
+    os.mkdir('plots')
+
+if not os.path.exists('plots/outliers'):
+    os.mkdir('plots/outliers')
+
+for feature in KOI_df.select_dtypes(include='number').columns:
+
+    print(f'Saving figures for {feature} (2/3 agreement)')
+
+    if feature not in outliers_2agree:
+        is_outlier = [False for _ in range(KOI_df.shape[0])]
+    else:
+        is_outlier = KOI_df.index.isin(outliers_2agree[feature])
+
+    colors = []
+
+    for i in range(len(is_outlier)):
+
+        if is_outlier[i] == True:
+            color = 'red'
+        else:
+            color= 'green'
+
+        colors.append(color)
+
+    plt.clf()
+    plt.scatter(KOI_df['kepid'], KOI_df[feature], c=colors, s=5)
+    plt.scatter([], [], c='red', label='Outlier')
+    plt.scatter([], [], c='green', label='Not Outlier')
+    plt.xlabel('kepid')
+    plt.ylabel(f'{feature}')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f'plots/outliers/{feature}-2-out-of-3-agreement.png', dpi=300)
+
+# Save scatter plots of kepid compared to each feature (with outliers marked, 3/3 outlier detection methods agreed)
+
+for feature in KOI_df.select_dtypes(include='number').columns:
+
+    if feature not in outliers_3agree:
+        print(f'{feature} has 0 outliers so nothing to save (3/3 agreement)')
+        continue
+
+    print(f'Saving figures for {feature} (3/3 agreement)')
+
+    if feature not in outliers_3agree:
+        is_outlier = [False for _ in range(KOI_df.shape[0])]
+    else:
+        is_outlier = KOI_df.index.isin(outliers_3agree[feature])
+
+    colors = []
+
+    for i in range(len(is_outlier)):
+
+        if is_outlier[i] == True:
+            color = 'red'
+        else:
+            color= 'green'
+
+        colors.append(color)
+
+    plt.clf()
+    plt.scatter(KOI_df['kepid'], KOI_df[feature], c=colors, s=5)
+    plt.scatter([], [], c='red', label='Outlier')
+    plt.scatter([], [], c='green', label='Not Outlier')
+    plt.xlabel('kepid')
+    plt.ylabel(f'{feature}')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f'plots/outliers/{feature}-3-out-of-3-agreement.png', dpi=300)
+```
+
+Markdown Cell:
+## Markdown Content:
+Visually, unanimous agreement (3/3) seems to be a better outlier detection. 2/3 agreement considers a large portion of the data to be outliers which would likely lead to insufficient amount of data to train off. Going forward, outliers will require unanimous agreement.
+
+Markdown Cell:
+## Markdown Content:
+### Impute
+
+Markdown Cell:
+## Markdown Content:
+The strategy will be to impute missing valus with median values for numerical values and the most frequent category for categorical variables. Outliers will not be included in the statistics used for imputing. "koi_disposition" is the target and will not be imputed. "koi_pdisposition" is closely related to the target so the same will follow. For categorical variables, if more than 50% of the non-null values are the same then it would be imputed. This prevents imputing for columns like "kepler_name" (planet name) which would not make sense to guess by frequency alone.
+
+Code Cell:
+```python
+# Select numerical and categorical columns
+num_cols = KOI_df.select_dtypes(include='number').columns
+cat_cols = KOI_df.select_dtypes(exclude='number').drop(columns=['koi_disposition', 'koi_pdisposition']).columns
+
+print('Numerical Imputations')
+print('------------------------')
+
+# Impute numerical columns with median
+
+for col in num_cols:
+
+    if col not in outliers_3agree:
+        not_outlier = [True for _ in range(KOI_df.shape[0])]
+    else:
+        not_outlier = ~KOI_df.index.isin(outliers_3agree[feature])
+
+    median = KOI_df[not_outlier][col].median()
+    num_nulls = KOI_df[col].isna().sum()
+
+    if num_nulls > 0:
+        KOI_df[col] = KOI_df[col].fillna(median)
+        print(f'Imputed {num_nulls} nulls of {col} with {median}')
+
+print()
+print('Categorical Imputations')
+print('------------------------')
+
+# Impute categorical columns with median
+for col in cat_cols:
+
+    most_frequent = KOI_df[col].value_counts().index[0]
+    num_occurrences = KOI_df[col].value_counts().iloc[0]
+    total_values = KOI_df[~KOI_df[col].isna()].shape[0]
+    num_nulls = KOI_df[col].isna().sum()
+    threshold = 0.5
+
+    if num_nulls > 0 and num_occurrences/total_values > threshold:
+        KOI_df[col] = KOI_df[col].fillna(most_frequent)
+        print(f'Imputed {num_nulls} nulls of {col} with {most_frequent}')
+```
+
+Markdown Cell:
+## Markdown Content:
+### Quality Check
+
+Markdown Cell:
+## Markdown Content:
+At this point, there is a better feel for which variables are important. Here, these will be dealt with by dropping irrelvant features and rows. There is reservation to drop rows because that would be an entire star's data that is erased and a lot of corresponding light curve data would go to waste. When appropriate, a bad feature is preferred to be dropped rather than rows that it has nulls for.
+
+Code Cell:
+```python
+# Show columns that still have null values
+print('Columns with nulls remaining')
+print('---------------------------------')
+
+i = 1
+for col in KOI_df.columns:
+    num_nulls = KOI_df[col].isna().sum()
+    if num_nulls > 0:
+        print(f'{i}. {col} still has {num_nulls} nulls')
+        print(f'Number of unique entries: {KOI_df[col].nunique()}')
+        print('Sample of Up to 5 Values:')
+        display(KOI_df[col].head())
+        print()
+        i += 1
+```
+
+Markdown Cell:
+## Markdown Content:
+All the remaining columns with null values are non-numerical and suffer from relatively high cardinality. It would be difficult to make meaningful categories. Based off previous observations, there are many other features with potential for better predictive power so these can safely be dropped.
+
+Code Cell:
+```python
+# Drop remaining columns with nulls
+for col in KOI_df.columns:
+    num_nulls = KOI_df[col].isna().sum()
+    if num_nulls > 0:
+        KOI_df = KOI_df.drop(columns=col)
+        print(f'Dropped {col}')
+```
+
+Code Cell:
+```python
+# Show non-numerical columns
+print('Non-Numerical Columns')
+print('---------------------------------')
+
+i = 1
+for col in KOI_df.select_dtypes(exclude='number').columns:
+    print(f'Number of unique entries: {KOI_df[col].nunique()}')
+    print('Sample of Up to 5 Values:')
+    display(KOI_df[col].head())
+    print()
+    i += 1
+```
+
+Markdown Cell:
+## Markdown Content:
+"koi_quarters" and "kepoi_name" have high cardinality and better represent their information as strings. However, the other non-numerical columns can be converted to a categorical type since they are low cardinality and actual categories. "rowid" may also be dropped at this point since it is just a counter and the data frame's index or "kepoi_name" serve as better identifiers. Some floats are also better suited as integers.
+
+Code Cell:
+```python
+# Convert categorical variables to the categorical data type
+for col in KOI_df.select_dtypes(exclude='number').drop(columns=['koi_quarters', 'kepoi_name']):
+    KOI_df[col] = KOI_df[col].astype('category')
+    print(f'Converted {col} to category data type')
+
+# Drop rowid (counter)
+KOI_df = KOI_df.drop(columns='rowid')
+print('Dropped rowid')
+```
+
+Code Cell:
+```python
+# Convert int to float
+KOI_df['koi_tce_plnt_num'] = KOI_df['koi_tce_plnt_num'].astype(int)
+print('Converted koi_tce_plnt_num to int')
+```
+
+Markdown Cell:
+## Markdown Content:
+### Normalize
+
+Markdown Cell:
+## Markdown Content:
+To prepare for PCA, standard scaler will be used on features (not target).
+
+Code Cell:
+```python
+# Current data frame
+print('KOI Data Before Scaling')
+display(KOI_df)
+```
+
+Code Cell:
+```python
+from sklearn.preprocessing import StandardScaler
+
+# Apply standard scaler to numerical features
+scaler = StandardScaler()
+KOI_scaled = KOI_df.copy()
+num_features = KOI_scaled.select_dtypes(include='number').columns
+scaler.fit(KOI_scaled[num_features])
+KOI_scaled[num_features] = scaler.transform(KOI_scaled[num_features])
+
+print('KOI Data After Scaling')
+display(KOI_scaled)
+```
+
+Markdown Cell:
+## Markdown Content:
+### Save Cleaned KOI Data
+
+Code Cell:
+```python
+KOI_scaled.to_csv('KOI_cumulative_cleaned.csv', index=False)
+```
+
+Markdown Cell:
+## Markdown Content:
+## Light Curves
+
+Markdown Cell:
+## Markdown Content:
+### Basic Information
+
+Code Cell:
+```python
+# Connect to database
+conn = sqlite3.connect('light_curves.db')
+cursor = conn.cursor()
+cursor.execute('PRAGMA cache_size = 1000000')
+
+# Display first 5 rows
+query = """
+    SELECT *
+    FROM LightCurve
+    LIMIT 5;
+    """
+
+df = pd.read_sql(query, conn)
+print('First 5 Rows')
+print(df)
+
+# Display number of nulls per column
+columns = ['KEP_ID', 'TIME', 'TIMECORR', 'PDCSAP_FLUX', 'PDCSAP_FLUX_ERR', 'SAP_QUALITY']
+
+for col in columns:
+
+    query = f"""
+        SELECT COUNT(*) AS num_nulls
+        FROM LightCurve
+        WHERE {col} IS NULL;
+        """
+
+    df = pd.read_sql(query, conn)
+    print()
+    print(f'{col} Nulls')
+    print(df)
+
+query = f"""
+        SELECT COUNT(*) AS num_nulls
+        FROM LightCurve
+        WHERE KEP_ID IS NULL OR TIME IS NULL OR TIMECORR IS NULL OR PDCSAP_FLUX IS NULL OR PDCSAP_FLUX_ERR IS NULL OR SAP_QUALITY IS NULL;
+        """
+
+df = pd.read_sql(query, conn)
+print()
+print(f'Number of Complete Null Rows')
+print(df)
+```
+
+Markdown Cell:
+## Markdown Content:
+Due to the current size and structure of the light curve data, as well as computational constraints, queries are extremely slow. At this point, it is difficult to acquire summary statistics via SQL queries. However, insights from the KOI dataset are closely related to the light curve data. Star compositions, locations, etc. were already processed via the KOI dataset. Combined with the sample and null counts, there is sufficient understanding of the light curve data for the exploratory phase. More in depth analysis can be done during feature selection since the dimensionality should be reduced in that phase. Removing nulls is not necessary at this time since they provide valuable information. For example, periodic missing times could mean the detectors regularly turn off and this could be important to know, both for personal knowledge and possibly for the model to learn. SAP_QUALITY has no nulls and usually describes why the rest are missing via codes. Also, a model of interest is RNN which can have a masking layer that skips nulls. NASA provides their own documentation which combined with domain knowledge gives the general idea of the summary statistics. Finally, due to these computational constraints, the KOI and light curve data will be "virtually" merged. They will exist in their own locations, but KOI has a star id feature which will be able to identify rows in the light curve data to select. A physical merge will happen right before model training since the data would be significantly reduced by then.
+

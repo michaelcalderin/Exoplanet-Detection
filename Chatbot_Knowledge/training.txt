@@ -1,0 +1,1091 @@
+
+
+This file is the content of "training.ipynb"
+
+Markdown Cell:
+## Markdown Content:
+# Feature Engineering/Selection and Training Models
+
+Markdown Cell:
+## Markdown Content:
+## Feature Engineering/Selection: KOI Data
+
+Markdown Cell:
+## Markdown Content:
+### Import KOI Data
+
+Code Cell:
+```python
+import pandas as pd
+import numpy as np
+
+KOI_df = pd.read_csv('KOI_cumulative_cleaned.csv')
+```
+
+Markdown Cell:
+## Markdown Content:
+### Preparing Categorical Features and Preliminary Feature Reduction
+
+Code Cell:
+```python
+# Convert object types to category
+object_cols = KOI_df.select_dtypes(exclude='number').columns.to_list()
+KOI_df[object_cols] = KOI_df[object_cols].astype('category')
+```
+
+Code Cell:
+```python
+# Show uniqueness of categorical features
+KOI_df.select_dtypes(exclude='number').nunique()
+```
+
+Markdown Cell:
+## Markdown Content:
+"kepoi_name" is entirely unique and will not be informative so it will be kept for identification purposes but dropped as a feature when training. "kepid" has a slightly lower cardinality but is also identifier and the same treatment will follow. "koi_quarters" is in a binary string format that could be better represented as 32 features, each representing a quarter. Another way to transform "koi_quarters" would be to make a new feature that represents the number of quarters that transit was measured across.
+
+Code Cell:
+```python
+# Turn koi_quarters into 32 features, each representing a quarter
+num_quarters = 0
+for binary_str in KOI_df['koi_quarters'].values:
+    if len(binary_str) > num_quarters:
+        num_quarters = len(binary_str)
+
+for i in range(num_quarters):
+    KOI_df[f'koi_quarters_{i+1}'] = [0 for _ in range(KOI_df.shape[0])]
+
+for binary_str in KOI_df['koi_quarters'].values:
+    for i in range(len(binary_str)):
+        KOI_df[f'koi_quarters_{i+1}'] = int(binary_str[i])
+```
+
+Code Cell:
+```python
+# Make a new feature from koi_quarters that represents the number of quarters
+KOI_df['num_quarters'] = [0 for _ in range(KOI_df.shape[0])]
+
+for i, binary_str in KOI_df['koi_quarters'].items():
+    num_quarters_searched = sum([int(digit) for digit in binary_str])
+    KOI_df.loc[i, 'num_quarters'] = num_quarters_searched
+```
+
+Code Cell:
+```python
+# Drop koi_quarters
+KOI_df = KOI_df.drop(columns='koi_quarters')
+```
+
+Markdown Cell:
+## Markdown Content:
+"koi_pdisposition" should be dropped since it is the guess from NASA's own automated system (based on rules but not a machine learning model). It will likely be a very strong predictor of "koi_disposition" but is not ideal for this project since part of the interest is to see how the models can compare to NASA's predictions. The same can be said for "koi_score" and false positive flags since they come from Robovetter (NASA's rule-based classifier). Their inclusion will be reconsidered depending on model performance.
+
+Code Cell:
+```python
+# Drop koi_pdisposition and koi_score
+KOI_df = KOI_df.drop(columns=['koi_pdisposition', 'koi_score'])
+
+# Drop false positive flags
+cols = KOI_df.columns
+for col in cols:
+    if col.find('fpflag') != -1:
+        print(f'Flag will be dropped: {col}')
+        KOI_df = KOI_df.drop(columns=col)
+```
+
+Markdown Cell:
+## Markdown Content:
+Features related to errors will be dropped because they typically have high collinearity, include noise, and are not very interpretable. They could give insights into the distribution of the variable they correspond to, but there is a chance these error features will prevent patterns in more interpretable (and potentially more important) features from shining through.
+
+Code Cell:
+```python
+# Drop error-related features
+cols = KOI_df.columns
+for col in cols:
+    if col.find('err') != -1:
+        print(f'Error will be dropped: {col}')
+        KOI_df = KOI_df.drop(columns=col)
+```
+
+Markdown Cell:
+## Markdown Content:
+At this point, the categorical features will be encoded so that techniques for dimensionality reduction can be employed.
+
+Code Cell:
+```python
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
+from sklearn.compose import ColumnTransformer
+
+# Encode categorical features
+cat_cols = KOI_df.select_dtypes(exclude='number').drop(columns=['koi_disposition', 'kepoi_name']).columns.to_list()
+encoder = ColumnTransformer([('one_hot', OneHotEncoder(), cat_cols), ('ordinal', OrdinalEncoder(categories=[['FALSE POSITIVE', 'CANDIDATE', 'CONFIRMED']]), ['koi_disposition'])], remainder='passthrough')
+encoded_KOI = encoder.fit_transform(KOI_df)
+
+col_names = []
+for col in encoder.get_feature_names_out():
+    core_name = col.split('__')[-1]
+    col_names.append(core_name)
+
+encoded_KOI = pd.DataFrame(encoded_KOI, columns=col_names)
+```
+
+Code Cell:
+```python
+print('Encoded KOI')
+display(encoded_KOI)
+```
+
+Markdown Cell:
+## Markdown Content:
+### Using Tree-Based Feature Importance to Reduce Dimensionality
+
+Code Cell:
+```python
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import make_scorer, precision_score, accuracy_score, recall_score, f1_score, roc_auc_score
+
+# Split data
+X = encoded_KOI.drop(columns=['kepid', 'kepoi_name', 'koi_disposition'])
+y = encoded_KOI['koi_disposition'].astype(int)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+# Hyperparameter tune
+scoring = {'roc_auc': make_scorer(roc_auc_score, needs_proba=True, multi_class='ovo', average='macro'),
+           'precision': make_scorer(precision_score, average='macro'),
+           'accuracy': make_scorer(accuracy_score),
+           'recall': make_scorer(recall_score, average='macro'),
+           'f1': make_scorer(f1_score, average='macro')}
+params = {'criterion': ['gini', 'entropy', 'log_loss'], 'max_depth': [None, 1, 2, 5, 10, 50, 200], 'min_samples_split': [2, 10, 200, 500, 1000], 'min_samples_leaf': [1, 2, 3, 5, 20, 100]}
+grid = GridSearchCV(estimator=DecisionTreeClassifier(random_state=42), param_grid=params, scoring=scoring, refit='precision', cv=5, n_jobs=-1, verbose=1, return_train_score=True)
+grid.fit(X_train, y_train)
+
+# Print best parameters and score
+print('Best Parameters:')
+print(grid.best_params_)
+print()
+
+print('Best Mean Scores: Validation')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_test_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_test_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_test_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_test_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_test_roc_auc'][grid.best_index_]}")
+print()
+
+print('Best Mean Scores: Training')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_train_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_train_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_train_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_train_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_train_roc_auc'][grid.best_index_]}")
+```
+
+Code Cell:
+```python
+# Putting feature importances in descending order
+best_model = grid.best_estimator_
+feature_importances = list(enumerate(np.abs(best_model.feature_importances_)))
+feature_importances = sorted(feature_importances, key=lambda x: x[1], reverse=True)
+
+features = X_train.columns.to_list()
+for i in range(len(feature_importances)):
+    (index, value) = feature_importances[i]
+    feature_importances[i] = (features[index], value)
+
+print('Feature Importances')
+print('----------------------')
+print(feature_importances)
+```
+
+Markdown Cell:
+## Markdown Content:
+The following features will be chosen due to their ability to help distinguish the types of false positives and provide context:
+
+- koi_ror: helps with size of transiting object and star
+- koi_dikco_msky: helps with uncertainty of positional alignment
+- koi_max_mult_ev: helps with signal to noise ratio
+
+Code Cell:
+```python
+# Select most important features
+encoded_KOI = encoded_KOI[['kepid', 'kepoi_name', 'koi_ror', 'koi_dikco_msky', 'koi_max_mult_ev']]
+display(encoded_KOI)
+```
+
+Markdown Cell:
+## Markdown Content:
+## Feature Engineering/Selection: Light Curve Data
+
+Markdown Cell:
+## Markdown Content:
+It is important to highlight that this is a general pipeline for feature engineering and reduction, but the exact features for each model will vary. Although similar, each model has its own features that may be scaled differently to better suit the model.
+
+Markdown Cell:
+## Markdown Content:
+### Select Portions of Light Curves
+
+Code Cell:
+```python
+import pandas as pd
+
+# Import raw data because it has original scales
+raw_KOI = pd.read_csv('KOI_cumulative.csv', comment='#')
+raw_KOI = raw_KOI[raw_KOI['kepid'].isin(KOI_df['kepid'].values)]
+raw_KOI = raw_KOI.set_index(keys='kepoi_name')
+```
+
+Markdown Cell:
+## Markdown Content:
+The goal is to put 30 time measurements and their associated flux for each transit into a data frame.
+
+Code Cell:
+```python
+import sqlite3
+import csv
+import os
+
+def make_transit_csv(file_name, num_measurements=30, max_num_repeated_transits=1):
+
+    """
+    Parameters:
+        file_name: desired name of csv file that will be output
+        num_measurements=30: how many time steps to include from the light curve
+        max_num_repeated_transits: for a given event, determines many of its repetitions will be selected
+    """
+
+    # Connect to database
+    conn = sqlite3.connect('light_curves.db')
+    cursor = conn.cursor()
+    cursor.execute('PRAGMA cache_size = 1000000')
+
+    # Make header of csv
+
+    with open(file_name, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        header = ['kepoi_name', 'kepid']
+
+        for col in ['TIME', 'TIMECORR', 'PDCSAP_FLUX', 'PDCSAP_FLUX_ERR', 'SAP_QUALITY']:
+
+            header += [f'{col}{i}' for i in range(num_measurements)]
+
+        writer.writerow(header)
+
+    # Time between measurements is 30 minutes (convert to days)
+    cadence = 30 / 60 / 24
+
+    # For each transit, insert light curve into data frame
+    for name in encoded_KOI['kepoi_name'].values:
+
+        # Fetch light curve
+        row = raw_KOI.loc[name]
+        transit = row['koi_time0bk']
+        kepid = row['kepid']
+        period = row['koi_period']
+        allowed_error = 0.05
+
+        # Adds first few transits (limited by max_num_repeated_transits)
+        for i in range(max_num_repeated_transits):
+
+            max_time = transit + (cadence * num_measurements/2) * (1 + allowed_error)
+            min_time = transit - (cadence * num_measurements/2) * (1 + allowed_error)
+
+            query = f"""
+                SELECT *
+                FROM LightCurve
+                WHERE (TIME IS NOT NULL) AND (PDCSAP_FLUX IS NOT NULL) AND (KEP_ID = {kepid}) AND (TIME BETWEEN {min_time} AND {max_time})
+                ORDER BY TIME ASC;
+                """
+
+            result = cursor.execute(query).fetchall()
+
+            # If there's too many data points then truncate (from both sides)
+            while (len(result) > num_measurements):
+
+                del result[0]
+
+                if len(result) > num_measurements:
+                    del result[-1]
+
+            # If there's not enough data points then don't include
+            # Format result to be insertable into csv
+            transit_data = ()
+
+            if len(result) == num_measurements:
+
+                id, time, time_corr, flux, flux_err, quality = zip(*result)
+                transit_data = (name, kepid) + time + time_corr + flux + flux_err + quality
+
+                with open(file_name, mode='a', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(transit_data)
+
+            transit += period
+
+# Make csv where each row is a transit with its flux, flux error, etc. in a selected time windowa
+file_name = 'transits.csv'
+
+if not os.path.exists(file_name):
+
+    make_transit_csv(file_name, num_measurements=30, max_num_repeated_transits=4)
+```
+
+Markdown Cell:
+## Markdown Content:
+**IMPORTANT**: There are enough samples for planets and false positives so the classification will now be binary. The prediction will be whether the transit is a planet or false positive ... the candidate class will be dropped from now on.
+
+Markdown Cell:
+## Markdown Content:
+## Model Training: Random Forest Classifier
+
+Code Cell:
+```python
+import pandas as pd
+
+# Load data
+raw_KOI = pd.read_csv('KOI_cumulative.csv', comment='#')
+data = pd.read_csv('transits.csv')
+data = data.merge(raw_KOI.reset_index()[['kepoi_name', 'koi_disposition', 'koi_ror', 'koi_dikco_msky', 'koi_max_mult_ev']], on='kepoi_name')
+print('Data')
+display(data.head())
+```
+
+Code Cell:
+```python
+# Filter to only get time, flux, and the 3 contextual features
+cols = data.columns
+for col in cols:
+    if (col.find('TIME') != -1 and col.find('CORR') == -1) or (col.find('PDCSAP_FLUX') != -1 and col.find('ERR') == -1) or (col.find('koi_disposition') != -1) or (col.find('koi_ror') != -1) or (col.find('koi_dikco_msky') != -1) or (col.find('koi_max_mult_ev') != -1) or (col.find('kepoi_name') != -1) or (col.find('kepid') != -1):
+        pass
+    else:
+        data = data.drop(columns=col)
+
+# Filter to not include candidate class
+data = data[data['koi_disposition'] != 'CANDIDATE'].dropna()
+print('Data filtered')
+display(data.head())
+```
+
+Markdown Cell:
+## Markdown Content:
+Time and flux measurements will be converted into features that are change in flux over change in time to give the slope of the light curve.
+
+Code Cell:
+```python
+# Engineer Features
+n_times = 30
+for i in range(n_times-1):
+    change_time = (data[f'TIME{i+1}'] - data[f'TIME{i}'])
+    change_flux = (data[f'PDCSAP_FLUX{i+1}'] - data[f'PDCSAP_FLUX{i}'])
+    flux_over_time = change_flux / change_time
+    data[f'FLUX_OVER_TIME{i}'] = flux_over_time
+
+# Drop time and flux since it's no longer needed
+for i in range(n_times):
+    data = data.drop(columns=[f'TIME{i}', f'PDCSAP_FLUX{i}'])
+```
+
+Code Cell:
+```python
+print('Engineered Data')
+display(data.head())
+```
+
+Markdown Cell:
+## Markdown Content:
+No scaling will be used since random forest uses trees which do not require it.
+
+Code Cell:
+```python
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.metrics import make_scorer, precision_score, accuracy_score, recall_score, f1_score, roc_auc_score
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+
+# Split data into training and testing (80-20)
+y = data['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+data_train, data_test = train_test_split(data, test_size=0.2, random_state=42, stratify=y)
+y_train = data_train['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_train = data_train.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+y_test = data_test['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_test = data_test.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+print('X_train')
+display(X_train.head())
+print('y_train')
+display(y_train.head())
+
+# Tune
+scoring = {'roc_auc': 'roc_auc',
+           'precision': 'precision',
+           'accuracy': 'accuracy',
+           'recall': 'recall',
+           'f1': 'f1'}
+
+params = {'criterion': ['gini', 'entropy'], 
+          'max_depth': [2, 5, 10, 50, 100, 200], 
+          'min_samples_split': [350, 400, 450, 500, 550], 
+          'min_samples_leaf': [2, 3, 5, 20]}
+
+grid = GridSearchCV(estimator=RandomForestClassifier(random_state=42), 
+                    param_grid=params,
+                      scoring=scoring, 
+                      refit='precision', 
+                      cv=5, 
+                      n_jobs=-1, 
+                      verbose=1, 
+                      return_train_score=True)
+
+grid.fit(X_train, y_train)
+
+# Print best parameters and score
+print('Best Parameters:')
+print(grid.best_params_)
+print()
+
+print('Best Mean Scores Across Splits: Validation')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_test_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_test_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_test_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_test_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_test_roc_auc'][grid.best_index_]}")
+print()
+
+print('Best Mean Scores Across Splits: Training')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_train_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_train_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_train_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_train_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_train_roc_auc'][grid.best_index_]}")
+
+# Save model
+joblib.dump(grid.best_estimator_, 'random_forest.pkl')
+```
+
+Code Cell:
+```python
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+
+# Show classification report
+best_model = grid.best_estimator_
+y_pred = best_model.predict(X_train)
+print('Classification Report')
+print(classification_report(y_train, y_pred))
+
+# Confusion Matrix
+y_pred = best_model.predict(X_train)
+confusion = confusion_matrix(y_train, y_pred)
+disp = ConfusionMatrixDisplay(confusion)
+print('Confusion Matrix')
+disp.plot()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+
+# Plot ROC curve
+y_probs = best_model.predict_proba(X_train)[:, 1]
+fpr, tpr, thresholds = roc_curve(y_train, y_probs)
+auc = roc_auc_score(y_train, y_probs)
+plt.plot(fpr, tpr, label=f'AUC: {auc:.2f}')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Training Data')
+plt.grid(linestyle='--')
+plt.legend()
+plt.show()
+```
+
+Code Cell:
+```python
+# Show feature importances
+plt.figure(figsize=(10,6))
+plt.plot(range(len(grid.best_estimator_.feature_importances_)), grid.best_estimator_.feature_importances_, marker='o')
+plt.xlabel('Feature', labelpad=15)
+plt.ylabel('Weight (Importance)')
+plt.xticks(ticks=range(len(X_train.columns)), labels=[X_train.columns[i] for i in range(len(X_train.columns))], rotation=90)
+plt.grid(linestyle='--')
+plt.title('Feature Importances for Random Forest')
+plt.show()
+```
+
+Markdown Cell:
+## Markdown Content:
+## Model Training: Logistic Regression Classifier
+
+Code Cell:
+```python
+import pandas as pd
+
+# Load data
+raw_KOI = pd.read_csv('KOI_cumulative.csv', comment='#')
+data = pd.read_csv('transits.csv')
+data = data.merge(raw_KOI.reset_index()[['kepoi_name', 'koi_disposition', 'koi_ror', 'koi_dikco_msky', 'koi_max_mult_ev']], on='kepoi_name')
+print('Data')
+display(data.head())
+```
+
+Code Cell:
+```python
+# Filter to only get time, flux, and the 3 contextual features
+cols = data.columns
+for col in cols:
+    if (col.find('TIME') != -1 and col.find('CORR') == -1) or (col.find('PDCSAP_FLUX') != -1 and col.find('ERR') == -1) or (col.find('koi_disposition') != -1) or (col.find('koi_ror') != -1) or (col.find('koi_dikco_msky') != -1) or (col.find('koi_max_mult_ev') != -1) or (col.find('kepoi_name') != -1) or (col.find('kepid') != -1):
+        pass
+    else:
+        data = data.drop(columns=col)
+
+# Filter to not include candidate class
+data = data[data['koi_disposition'] != 'CANDIDATE'].dropna()
+print('Data filtered')
+display(data.head())
+```
+
+Markdown Cell:
+## Markdown Content:
+Time and flux measurements will be converted into features that are change in flux over change in time to give the slope of the light curve.
+
+Code Cell:
+```python
+# Engineer Features
+n_times = 30
+for i in range(n_times-1):
+    change_time = (data[f'TIME{i+1}'] - data[f'TIME{i}'])
+    change_flux = (data[f'PDCSAP_FLUX{i+1}'] - data[f'PDCSAP_FLUX{i}'])
+    flux_over_time = change_flux / change_time
+    data[f'FLUX_OVER_TIME{i}'] = flux_over_time
+
+# Drop time and flux since it's no longer needed
+for i in range(n_times):
+    data = data.drop(columns=[f'TIME{i}', f'PDCSAP_FLUX{i}'])
+```
+
+Code Cell:
+```python
+print('Engineered Data')
+display(data.head())
+```
+
+Markdown Cell:
+## Markdown Content:
+The features will be scaled using standard scaler since it will help with convergence.
+
+Code Cell:
+```python
+from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.metrics import make_scorer, precision_score, accuracy_score, recall_score, f1_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+import warnings
+warnings.filterwarnings('ignore')
+
+# Split data into training and testing (80-20)
+y = data['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+data_train, data_test = train_test_split(data, test_size=0.2, random_state=42, stratify=y)
+y_train = data_train['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_train = data_train.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+y_test = data_test['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_test = data_test.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+print('X_train')
+display(X_train.head())
+print('y_train')
+display(y_train.head())
+
+# Scale
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_train = pd.DataFrame(X_train, columns=scaler.get_feature_names_out())
+X_test = scaler.transform(X_test)
+X_test = pd.DataFrame(X_test, columns=scaler.get_feature_names_out())
+
+# Tune
+scoring = {'roc_auc': 'roc_auc',
+           'precision': 'precision',
+           'accuracy': 'accuracy',
+           'recall': 'recall',
+           'f1': 'f1'}
+params = {'C': [0.1, 1, 5, 10, 15, 20], 'penalty': ['l1', 'l2'], 'max_iter': [100, 200, 500], 'solver': ['lbfgs', 'liblinear', 'saga']}
+grid = GridSearchCV(estimator=LogisticRegression(random_state=42), param_grid=params, scoring=scoring, refit='precision', cv=5, n_jobs=-1, verbose=1, return_train_score=True)
+grid.fit(X_train, y_train)
+
+# Print best parameters and score
+print('Best Parameters:')
+print(grid.best_params_)
+print()
+
+print('Best Mean Scores Across Splits: Validation')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_test_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_test_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_test_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_test_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_test_roc_auc'][grid.best_index_]}")
+print()
+
+print('Best Mean Scores Across Splits: Training')
+print('----------------------------')
+print(f"Precision: {grid.cv_results_['mean_train_precision'][grid.best_index_]}")
+print(f"Recall: {grid.cv_results_['mean_train_recall'][grid.best_index_]}")
+print(f"F1: {grid.cv_results_['mean_train_f1'][grid.best_index_]}")
+print(f"Accuracy: {grid.cv_results_['mean_train_accuracy'][grid.best_index_]}")
+print(f"AUC: {grid.cv_results_['mean_train_roc_auc'][grid.best_index_]}")
+
+# Save model
+joblib.dump(grid.best_estimator_, 'logistic_regression.pkl')
+```
+
+Code Cell:
+```python
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+
+# Show classification report
+best_model = grid.best_estimator_
+y_pred = best_model.predict(X_train)
+print('Classification Report')
+print(classification_report(y_train, y_pred))
+
+# Confusion Matrix
+y_pred = best_model.predict(X_train)
+confusion = confusion_matrix(y_train, y_pred)
+disp = ConfusionMatrixDisplay(confusion)
+print('Confusion Matrix')
+disp.plot()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+
+# Plot ROC curve
+y_probs = best_model.predict_proba(X_train)[:, 1]
+fpr, tpr, thresholds = roc_curve(y_train, y_probs)
+auc = roc_auc_score(y_train, y_probs)
+plt.plot(fpr, tpr, label=f'AUC: {auc:.2f}')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Training Data')
+plt.grid(linestyle='--')
+plt.legend()
+plt.show()
+```
+
+Code Cell:
+```python
+# Show feature importances
+plt.figure(figsize=(10,6))
+plt.plot(range(len(grid.best_estimator_.coef_.flatten())), np.abs(grid.best_estimator_.coef_.flatten()), marker='o')
+plt.xlabel('Feature', labelpad=15)
+plt.ylabel('Magnitude of Coefficients for Logistic Regression')
+plt.xticks(ticks=range(len(X_train.columns)), labels=[X_train.columns[i] for i in range(len(X_train.columns))], rotation=90)
+plt.grid(linestyle='--')
+plt.title('Magnitude of Coefficients')
+plt.show()
+```
+
+Markdown Cell:
+## Markdown Content:
+## Model Training: RNN
+
+Code Cell:
+```python
+import pandas as pd
+
+# Load data
+raw_KOI = pd.read_csv('KOI_cumulative.csv', comment='#')
+data = pd.read_csv('transits.csv')
+data = data.merge(raw_KOI.reset_index()[['kepoi_name', 'koi_disposition', 'koi_ror', 'koi_dikco_msky', 'koi_max_mult_ev']], on='kepoi_name')
+print('Data')
+display(data.head())
+```
+
+Code Cell:
+```python
+# Filter to only get time, flux, and the 3 contextual features
+cols = data.columns
+for col in cols:
+    if (col.find('TIME') != -1 and col.find('CORR') == -1) or (col.find('PDCSAP_FLUX') != -1 and col.find('ERR') == -1) or (col.find('koi_disposition') != -1) or (col.find('koi_ror') != -1) or (col.find('koi_dikco_msky') != -1) or (col.find('koi_max_mult_ev') != -1) or (col.find('kepoi_name') != -1) or (col.find('kepid') != -1):
+        pass
+    else:
+        data = data.drop(columns=col)
+
+# Filter to not include candidate class
+data = data[data['koi_disposition'] != 'CANDIDATE'].dropna()
+print('Data filtered')
+display(data.head())
+```
+
+Markdown Cell:
+## Markdown Content:
+The features will be scaled using min-max since it will help with convergence and neural networks often do best with [0,1] range. The model will be hypertuned for precision by using random choices for the number of neurons in a layer, learning rate, etc. This hypertuning will be done with early stopping and 200 epochs; the best model will later be trained across the full 200 epochs without early stopping to further reduce validation loss.
+
+Code Cell:
+```python
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Dropout, BatchNormalization, GRU
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+import numpy as np
+import joblib
+import random
+
+# Split data into training and testing (80-20)
+y = data['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+data_train, data_test = train_test_split(data, test_size=0.2, random_state=42, stratify=y)
+y_train = data_train['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_train = data_train.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+y_test = data_test['koi_disposition'].apply(lambda val: 1 if val == 'CONFIRMED' else 0)
+X_test = data_test.drop(columns=['koi_disposition', 'kepid', 'kepoi_name'])
+print('X_train')
+display(X_train.head())
+print('y_train')
+display(y_train.head())
+
+# Scale
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_train = pd.DataFrame(X_train, columns=scaler.get_feature_names_out())
+X_test = scaler.transform(X_test)
+X_test = pd.DataFrame(X_test, columns=scaler.get_feature_names_out())
+
+# Build model
+def build_model(hyperparams, n_timesteps=30, n_time_features=2, n_context_features=3):
+
+    dropout = random.choice(hyperparams['dropout'])
+    learning_rate = random.choice(hyperparams['learning_rate'])
+    time_layer = random.choice(hyperparams['time_layer'])
+    batch_size = random.choice(hyperparams['batch_size'])
+    n_neurons_in_order = []
+
+    # Input
+    time_input = Input(shape=(n_timesteps, n_time_features), name='time_input')
+    context_input = Input(shape=(n_context_features,), name='context_input')
+
+    # RNN
+    if time_layer == 'LSTM':
+        n_neurons = random.choice(hyperparams['n_neurons'])
+        n_neurons_in_order.append(n_neurons)
+        time_out = LSTM(n_neurons, return_sequences=True, name='time_1')(time_input)
+        time_out = Dropout(dropout, name='time_drop1')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm1')(time_out)
+        n_neurons = random.choice(hyperparams['n_neurons'])
+        n_neurons_in_order.append(n_neurons)
+        time_out = LSTM(n_neurons, return_sequences=False, name='time_2')(time_out)
+        time_out = Dropout(dropout, name='time_drop2')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm2')(time_out)
+    elif time_layer == 'GRU':
+        n_neurons = random.choice(hyperparams['n_neurons'])
+        n_neurons_in_order.append(n_neurons)
+        time_out = GRU(n_neurons, return_sequences=True, name='time_1')(time_input)
+        time_out = Dropout(dropout, name='time_drop1')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm1')(time_out)
+        n_neurons = random.choice(hyperparams['n_neurons'])
+        n_neurons_in_order.append(n_neurons)
+        time_out = GRU(n_neurons, return_sequences=False, name='time_2')(time_out)
+        time_out = Dropout(dropout, name='time_drop2')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm2')(time_out)
+    else:
+        print('Unknown option given to "time_layer" hyperparameter! Use "LSTM" and/or "GRU".')
+        return None
+
+    # Context
+    n_neurons = random.choice(hyperparams['n_neurons'])
+    n_neurons_in_order.append(n_neurons)
+    context_out = Dense(n_neurons, activation='relu', name='context_out')(context_input)
+
+    # Combined
+    combined = Concatenate(name='combined')([time_out, context_out])
+    n_neurons = random.choice(hyperparams['n_neurons'])
+    n_neurons_in_order.append(n_neurons)
+    combined = Dense(n_neurons, activation='relu', name='combined_dense1')(combined)
+    combined = Dropout(dropout, name='combined_drop1')(combined)
+    combined = BatchNormalization(name='combined_batch_norm1')(combined)
+    n_neurons = random.choice(hyperparams['n_neurons'])
+    n_neurons_in_order.append(n_neurons)
+    combined = Dense(n_neurons, activation='relu', name='combined_dense2')(combined)
+    combined = Dropout(dropout, name='combined_drop2')(combined)
+    combined = BatchNormalization(name='combined_batch_norm2')(combined)
+
+    # Output
+    output = Dense(1, activation='sigmoid', name='output')(combined)
+    model = Model(inputs=[time_input, context_input], outputs=output)
+
+    # Return model
+    optimizer=Adam(learning_rate=learning_rate)
+    model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['precision', 'recall', 'accuracy'])
+    return model, {'dropout': dropout, 'learning_rate': learning_rate, 'time_layer': time_layer, 'batch_size': batch_size, 'n_neurons_in_order': n_neurons_in_order}
+
+# Format X_train and y_train into numpy arrays
+time_cols = []
+flux_cols = []
+
+for col in X_train.columns:
+    if (col.find('TIME') != -1):
+        time_cols.append(col)
+    elif (col.find('PDCSAP_FLUX') != -1):
+        flux_cols.append(col)
+
+X_train_time = X_train[time_cols].to_numpy()
+X_train_flux = X_train[flux_cols].to_numpy()
+X_train_timesteps = np.stack((X_train_time, X_train_flux), axis=-1)
+X_train_context = X_train[['koi_ror', 'koi_dikco_msky', 'koi_max_mult_ev']].to_numpy()
+y_train = y_train.to_numpy()
+
+# Tune
+hyperparams = {'learning_rate': [1e-3, 1e-4, 1e-5], 'n_neurons': [16, 32, 64, 128, 256], 'dropout': [0, 0.1, 0.2, 0.3, 0.4, 0.5], 'time_layer': ['LSTM', 'GRU'], 'batch_size': [16, 32, 64, 128]}
+num_fits = 50
+precisions = []
+models = []
+
+for i in range(num_fits):
+
+    print(f'Fit {i+1} out of {num_fits}')
+
+    model, chosen_params = build_model(hyperparams)
+
+    early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, restore_best_weights=True)
+    model.fit([X_train_timesteps, X_train_context], y_train, epochs=200, batch_size=chosen_params['batch_size'], validation_split=0.2, verbose=1, callbacks=[early_stopping])
+    precision = model.history.history['val_precision'][-1]
+    precisions.append(precision)
+    models.append((model, chosen_params))
+
+# Best model
+best_index = precisions.index(max(precisions))
+model = models[best_index][0]
+
+# Show best hyperparams
+print()
+print('Best Hyperparameters')
+print(models[best_index][1])
+
+# Save model
+joblib.dump(model, 'RNN.pkl')
+joblib.dump(model.history, 'RNN_history.pkl')
+joblib.dump(models[best_index][1], 'RNN_params.pkl')
+```
+
+Code Cell:
+```python
+import matplotlib.pyplot as plt
+
+# Plot validation loss across epochs
+plt.plot(range(len(model.history.history['val_loss'])), model.history.history['val_loss'])
+plt.xlabel('Epoch')
+plt.ylabel('Validation Loss')
+plt.title('Validation Loss Across Epochs')
+plt.show()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+
+# Show classification report
+best_model = model
+y_pred = best_model.predict([X_train_timesteps, X_train_context])
+y_pred = (y_pred > 0.5).astype(int)
+print('Classification Report')
+print(classification_report(y_train, y_pred))
+
+# Confusion Matrix
+confusion = confusion_matrix(y_train, y_pred)
+disp = ConfusionMatrixDisplay(confusion)
+print('Confusion Matrix')
+disp.plot()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+
+# Plot ROC curve
+y_probs = best_model.predict([X_train_timesteps, X_train_context])
+fpr, tpr, thresholds = roc_curve(y_train, y_probs)
+auc = roc_auc_score(y_train, y_probs)
+plt.plot(fpr, tpr, label=f'AUC: {auc:.2f}')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Training Data')
+plt.grid(linestyle='--')
+plt.legend()
+plt.show()
+```
+
+Markdown Cell:
+## Markdown Content:
+The validation loss is noisy so the best hypertuned model will be trained for more epochs with a larger batch size.
+
+Code Cell:
+```python
+# Train best model over more epochs
+
+# Build model
+def build_final_model(hyperparams, n_timesteps=30, n_time_features=2, n_context_features=3):
+
+    time_layer = hyperparams['time_layer']
+    dropout = hyperparams['dropout']
+    learning_rate = hyperparams['learning_rate']
+    batch_size = hyperparams['batch_size']
+    n_neurons_in_order = hyperparams['n_neurons_in_order']
+    layer_index = 0
+
+    # Input
+    time_input = Input(shape=(n_timesteps, n_time_features), name='time_input')
+    context_input = Input(shape=(n_context_features,), name='context_input')
+
+    # RNN
+    if time_layer == 'LSTM':
+        n_neurons = n_neurons_in_order[layer_index]
+        layer_index += 1
+        time_out = LSTM(n_neurons, return_sequences=True, name='time_1')(time_input)
+        time_out = Dropout(dropout, name='time_drop1')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm1')(time_out)
+        n_neurons = n_neurons_in_order[layer_index]
+        layer_index += 1
+        time_out = LSTM(n_neurons, return_sequences=False, name='time_2')(time_out)
+        time_out = Dropout(dropout, name='time_drop2')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm2')(time_out)
+    elif time_layer == 'GRU':
+        n_neurons = n_neurons_in_order[layer_index]
+        layer_index += 1
+        time_out = GRU(n_neurons, return_sequences=True, name='time_1')(time_input)
+        time_out = Dropout(dropout, name='time_drop1')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm1')(time_out)
+        n_neurons = n_neurons_in_order[layer_index]
+        layer_index += 1
+        time_out = GRU(n_neurons, return_sequences=False, name='time_2')(time_out)
+        time_out = Dropout(dropout, name='time_drop2')(time_out)
+        time_out = BatchNormalization(name='time_batch_norm2')(time_out)
+    else:
+        print('Unknown option given to "time_layer" hyperparameter! Use "LSTM" and/or "GRU".')
+        return None
+
+    # Context
+    n_neurons = n_neurons_in_order[layer_index]
+    layer_index += 1
+    context_out = Dense(n_neurons, activation='relu', name='context_out')(context_input)
+
+    # Combined
+    combined = Concatenate(name='combined')([time_out, context_out])
+    n_neurons = n_neurons_in_order[layer_index]
+    layer_index += 1
+    combined = Dense(n_neurons, activation='relu', name='combined_dense1')(combined)
+    combined = Dropout(dropout, name='combined_drop1')(combined)
+    combined = BatchNormalization(name='combined_batch_norm1')(combined)
+    n_neurons = n_neurons_in_order[layer_index]
+    layer_index += 1
+    combined = Dense(n_neurons, activation='relu', name='combined_dense2')(combined)
+    combined = Dropout(dropout, name='combined_drop2')(combined)
+    combined = BatchNormalization(name='combined_batch_norm2')(combined)
+
+    # Output
+    output = Dense(1, activation='sigmoid', name='output')(combined)
+    model = Model(inputs=[time_input, context_input], outputs=output)
+
+    # Return model
+    optimizer=Adam(learning_rate=learning_rate)
+    model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['precision', 'recall', 'accuracy'])
+    return model, {'dropout': dropout, 'learning_rate': learning_rate, 'time_layer': time_layer, 'batch_size': batch_size, 'n_neurons_in_order': n_neurons_in_order}
+
+# Tune
+hyperparams = {
+    'dropout': 0.1,
+    'learning_rate': 0.0001,
+    'time_layer': 'LSTM',
+    'batch_size': 32,
+    'n_neurons_in_order': [256, 128, 64, 128, 16]
+    }
+model, chosen_params = build_final_model(hyperparams)
+#early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, restore_best_weights=True)
+model.fit([X_train_timesteps, X_train_context], y_train, epochs=200, batch_size=chosen_params['batch_size'], validation_split=0.2, verbose=1)
+
+print(f'Final Hyperparameters: {chosen_params}')
+
+# Save model
+joblib.dump(model, 'RNN.pkl')
+joblib.dump(model.history, 'RNN_history.pkl')
+joblib.dump(chosen_params, 'RNN_params.pkl')
+```
+
+Code Cell:
+```python
+import matplotlib.pyplot as plt
+
+# Plot validation loss across epochs
+plt.plot(range(len(joblib.load('RNN_history.pkl').history['val_loss'])), joblib.load('RNN_history.pkl').history['val_loss'])
+
+plt.xlabel('Epoch')
+plt.ylabel('Validation Loss')
+plt.title('Validation Loss Across Epochs')
+plt.show()
+
+# Plot validation precision across epochs
+plt.plot(range(len(joblib.load('RNN_history.pkl').history['val_precision'])), joblib.load('RNN_history.pkl').history['val_precision'])
+plt.show()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+
+# Show classification report
+best_model = model
+y_pred = best_model.predict([X_train_timesteps, X_train_context])
+y_pred = (y_pred > 0.5).astype(int)
+print('Classification Report')
+print(classification_report(y_train, y_pred))
+
+# Confusion Matrix
+confusion = confusion_matrix(y_train, y_pred)
+disp = ConfusionMatrixDisplay(confusion)
+print('Confusion Matrix')
+disp.plot()
+```
+
+Code Cell:
+```python
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+
+# Plot ROC curve
+y_probs = best_model.predict([X_train_timesteps, X_train_context])
+fpr, tpr, thresholds = roc_curve(y_train, y_probs)
+auc = roc_auc_score(y_train, y_probs)
+plt.plot(fpr, tpr, label=f'AUC: {auc:.2f}')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Training Data')
+plt.grid(linestyle='--')
+plt.legend()
+plt.show()
+```
+
+Code Cell:
+```python
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Plot both validation and training loss across epochs
+val_loss = joblib.load('RNN_history.pkl').history['val_loss']
+train_loss = joblib.load('RNN_history.pkl').history['loss']
+epochs = range(len(val_loss))
+
+plt.plot(epochs, val_loss, color='orange', label='Validation')
+plt.plot(epochs, train_loss, color='blue', label='Training')
+plt.title('Loss Across Epochs')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.yticks(ticks=np.arange(0.2, 0.9, 0.1))
+plt.grid(linestyle='--')
+plt.legend()
+plt.show()
+```
+

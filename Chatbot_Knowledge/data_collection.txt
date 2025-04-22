@@ -1,0 +1,150 @@
+
+
+This file is the content of "data_collection.ipynb"
+
+Markdown Cell:
+## Markdown Content:
+# Data Collection
+
+Markdown Cell:
+## Markdown Content:
+## Creating Database for Light Curves
+
+Code Cell:
+```python
+import sqlite3
+
+# Create database
+conn = sqlite3.connect('light_curves.db')
+cursor = conn.cursor()
+
+# Create LightCurve table
+cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS LightCurve (
+        KEP_ID INTEGER,
+        TIME REAL,
+        TIMECORR REAL,
+        PDCSAP_FLUX REAL,
+        PDCSAP_FLUX_ERR REAL,
+        SAP_QUALITY INTEGER,
+        PRIMARY KEY (KEP_ID, TIME)
+    );
+    """
+    )
+```
+
+Code Cell:
+```python
+import re
+
+def add_lightcurve_to_database(star_id, light_curve_path, cursor):
+
+    """ Takes a .tbl and adds its light curve data to the sql database """
+
+    # Read light curve data
+    file_path = light_curve_path
+    col_names = ['KEP_ID', 'TIME', 'TIMECORR', 'PDCSAP_FLUX', 'PDCSAP_FLUX_ERR', 'SAP_QUALITY']
+    num_headers_found = 0
+
+    with open(light_curve_path, 'r') as file:
+
+        # Read file line by line
+        for line in file:
+
+            text = line.strip()
+
+            # After the 4 headers are found, the actual data can be recorded
+            if num_headers_found == 4:
+
+                data = re.split(r'\s+', text)
+
+                KEP_ID = star_id
+
+                try:
+                    TIME = float(data[0])
+                except Exception:
+                    TIME = f'NULL'
+
+                try:
+                    TIMECORR = float(data[2])
+                except Exception:
+                    TIMECORR = f'NULL'
+
+                try:
+                    PDCSAP_FLUX = float(data[8])
+                except Exception:
+                    PDCSAP_FLUX = f'NULL'
+
+                try:
+                    PDCSAP_FLUX_ERR = float(data[9])
+                except Exception:
+                    PDCSAP_FLUX_ERR = f'NULL'
+                
+                try:
+                    SAP_QUALITY = int(data[10])
+                except Exception:
+                    SAP_QUALITY = f'NULL'
+
+                cursor.execute(
+                    f"""
+                    INSERT INTO LightCurve (KEP_ID, TIME, TIMECORR, PDCSAP_FLUX, PDCSAP_FLUX_ERR, SAP_QUALITY) VALUES ({KEP_ID}, {TIME}, {TIMECORR}, {PDCSAP_FLUX}, {PDCSAP_FLUX_ERR}, {SAP_QUALITY});
+                    """
+                    )
+            
+            # 4 lines start with '|' before the actual data so keep count
+            if len(text) > 0 and text[0] == '|':
+                num_headers_found += 1
+```
+
+Code Cell:
+```python
+import pandas as pd
+import subprocess
+import os
+
+# Load in data for candidates
+KOI_df = pd.read_csv('KOI_cumulative.csv', comment='#')
+
+# Get the light curves for the stars
+star_ids = KOI_df['kepid'].unique()
+download_file_path = 'D:\Exoplanet_Project\light_curves\downloads\download_time_series.txt'
+download_dir = 'D:\Exoplanet_Project\light_curves\downloads'
+
+with open(download_file_path, 'r') as file:
+
+    for i, line in enumerate(file):
+
+        # Get basic information from the line
+        data_file_name = line.split("'")[1]
+        extension = data_file_name.split('.')[1]
+        star_id = int(data_file_name.split('-')[0].replace('kplr', ''))
+        cmd = line.replace("'", '"')
+
+        # Skip if it's not a .tbl
+        if extension != 'tbl':
+            continue
+
+        # Download light curve
+        process = subprocess.run(cmd, cwd=download_dir, shell=True)
+        if process.returncode == 1:
+            print(f'Line Index {i} failed to download')
+        else:
+            print(f'Line Index {i} successfully downloaded')
+
+        # Add light curve to data base
+        light_curve_path = download_dir + f'/{data_file_name}'
+        add_lightcurve_to_database(star_id, light_curve_path, cursor)
+
+        # Delete light curve
+        if os.path.exists(light_curve_path):
+            os.remove(light_curve_path)        
+```
+
+Code Cell:
+```python
+# Commit and close database
+conn.commit()
+conn.close()
+```
+

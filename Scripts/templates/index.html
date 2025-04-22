@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exoplanet Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f7f7f7;
+        }
+        .container {
+            width: 500px;
+            padding: 20px;
+            border-radius: 10px;
+            background-color: white;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+        .message-box {
+            width: 100%;
+            height: 100px;
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: none;
+            box-sizing: border-box;
+        }
+        .message-echo-box {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #007AFF;
+            border-radius: 5px;
+            border: 1px solid #007AFF;
+            overflow-y: auto;
+            max-height: 50px;
+            text-align: right;
+            color: white;
+        }
+        .response {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #a1a1a1;
+            border-radius: 5px;
+            border: 1px solid #a1a1a1;
+            overflow-y: auto;
+            max-height: 200px;
+            text-align: left;
+            color: white;
+        }
+        button {
+            padding: 10px;
+            background-color: #007AFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Exoplanet Detection</h2>
+        <form method="POST">
+            <textarea name="message" class="message-box" placeholder="Ask about the project" required></textarea><br>
+            <button type="submit">Submit</button>
+        </form>
+
+        {% if user_msg %}
+        <div class="message-echo-box">
+            {{ user_msg }}
+        </div>
+        {% endif %}
+
+        {% if bot_response %}
+        <div class="response">
+            {{ bot_response }}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
