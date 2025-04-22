@@ -313,6 +313,8 @@ from sklearn.metrics import roc_auc_score, roc_curve
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
+from sklearn.model_selection import train_test_split
+import joblib
 
 # Load data
 raw_KOI = pd.read_csv('KOI_cumulative.csv', comment='#')
@@ -364,7 +366,7 @@ y_test = y_test.to_numpy()
 # Show classification report
 model = joblib.load('Models/RNN.pkl')
 y_pred = model.predict([X_test_timesteps, X_test_context])
-y_pred = (y_pred > 0.5).astype(int)
+y_pred = (y_pred > 0.5).astype(int).flatten()
 print('Classification Report')
 print(classification_report(y_test, y_pred))
 
