@@ -19,7 +19,7 @@ This process is covered in *training.ipynb* from *Scripts*. Three contextual fea
 The models were evaluated on the test set in *testing.ipynb* from *Scripts*. Potential biases were explored.
 
 ## Chatbot
-*chatbot_dev.ipynb* from *Scripts* covers the development of the chatbot to answer project-related questions. Unlike the other scripts, the directory structure of the GitHub is used and files generally do not need to be extracted to the working space as long as the working directory is *Scripts*. To use the chatbot, simply run the *chatbot_app.py* in *Scripts*.
+*chatbot_dev.ipynb* from *Scripts* covers the development of the chatbot to answer project-related questions. Unlike the other scripts, the directory structure of the GitHub is used and files generally do not need to be extracted to the working space as long as the working directory is *Scripts*. To use the chatbot, simply run the *chatbot_app.py* in *Scripts* and paste the local website URL into a browser (it is a Flask app). Make sure the *template* folder is in the same directory; it has the HTML for design purposes.
 
 ## Video Demonstrations
 - **Project Overview**: https://youtu.be/yYLAPwx-Lss
